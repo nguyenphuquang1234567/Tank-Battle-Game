@@ -993,7 +993,7 @@ function update() {
                         for (let i = 0; i < 3; i++) {
                             let miniColor = tank.color;
                             if (tank.color === '#e74c3c') miniColor = '#ff7f7f'; // Light red for red tank's minitanks
-                            miniTanks.push(new MiniTank({ ...tank, x: tank.x + offsets[i], y: tank.y, color: miniColor }, opponent));
+                            miniTanks.push(new MiniTank({ ...tank, x: tank.x + offsets[i], y: tank.y, color: miniColor, baseColor: tank.color }, opponent));
                         }
                         break;
                 }
@@ -1091,13 +1091,14 @@ function update() {
         const miniTank = miniTanks[i];
         for (let j = bullets.length - 1; j >= 0; j--) {
             const bullet = bullets[j];
-            // Ignore bullets from the same color as the miniTank's owner
-            if (bullet.color === miniTank.owner.color) continue;
+            // Only allow bullets from the opposite tank to damage minitank
+            if (bullet.color === miniTank.ownerBaseColor) continue;
             const dx = bullet.x - miniTank.x;
             const dy = bullet.y - miniTank.y;
             const distance = Math.sqrt(dx * dx + dy * dy);
             if (distance < miniTank.radius + bullet.radius) {
                 miniTank.health -= bullet.damage;
+                miniTank.flashTimer = 10;
                 playHitSound(); // Play hit sound for MiniTank
                 bullets.splice(j, 1);
                 if (miniTank.health <= 0) {
@@ -1165,6 +1166,7 @@ function update() {
                     const last = hazard.lastDamageFrame.get(miniTank) || -100;
                     if (now - last >= 30) {
                         miniTank.health -= hazard.damage;
+                        if (miniTank.health < 1) miniTank.health = 1; // Laser cannot destroy minitank
                         hazard.lastDamageFrame.set(miniTank, now);
                         effects.push(new BoomEffect(miniTank.x, miniTank.y, '#ff1744'));
                         playBoomSound();
@@ -1442,6 +1444,7 @@ function resetFullGame() {
 class MiniTank {
     constructor(owner, target) {
         this.owner = owner; // The player who spawned it
+        this.ownerBaseColor = owner.baseColor || owner.color; // Store original tank color
         this.target = target; // The opponent
         this.x = owner.x;
         this.y = owner.y;
@@ -1453,6 +1456,8 @@ class MiniTank {
         this.shootCooldown = 500; // ms
         this.lastShot = 0;
         this.lifetime = 600; // 10 seconds at 60fps
+        this.flashTimer = 0;
+        this.decayTimer = 0; // For health decay
     }
 
     update() {
@@ -1475,6 +1480,12 @@ class MiniTank {
         }
         // Lifetime countdown
         this.lifetime--;
+        // Health decay every 0.8 seconds (48 frames)
+        this.decayTimer++;
+        if (this.decayTimer >= 48) {
+            this.health -= 5;
+            this.decayTimer = 0;
+        }
         if (this.flashTimer > 0) this.flashTimer--;
     }
 
@@ -1519,6 +1530,29 @@ class MiniTank {
             ctx.fill();
             ctx.globalAlpha = 1;
         }
+        ctx.restore();
+        // Health bar (drawn above the minitank, not rotated)
+        const barWidth = 30;
+        const barHeight = 5;
+        const barX = this.x - barWidth / 2;
+        const barY = this.y - this.radius - 14;
+        ctx.save();
+        ctx.fillStyle = '#222';
+        ctx.fillRect(barX, barY, barWidth, barHeight);
+        const healthPercent = Math.max(0, this.health / 200);
+        ctx.fillStyle = healthPercent > 0.5 ? '#2ecc71' : healthPercent > 0.25 ? '#f39c12' : '#e74c3c';
+        ctx.fillRect(barX, barY, barWidth * healthPercent, barHeight);
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(barX, barY, barWidth, barHeight);
+        // Health number
+        ctx.font = 'bold 12px Arial';
+        ctx.textAlign = 'center';
+        ctx.strokeStyle = '#000';
+        ctx.lineWidth = 2;
+        ctx.strokeText(`${Math.max(0, Math.round(this.health))}/200`, this.x, barY - 3);
+        ctx.fillStyle = '#fff';
+        ctx.fillText(`${Math.max(0, Math.round(this.health))}/200`, this.x, barY - 3);
         ctx.restore();
     }
 
