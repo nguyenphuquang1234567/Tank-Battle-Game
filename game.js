@@ -14,6 +14,27 @@ resizeCanvas();
 // Handle window resize
 window.addEventListener('resize', resizeCanvas);
 
+// Mouse position tracking for cursor aiming
+let mouseX = 0;
+let mouseY = 0;
+
+// Track remote mouse positions for multiplayer
+let remoteMousePositions = {};
+
+// Track mouse movement for cursor aiming
+canvas.addEventListener('mousemove', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    mouseX = e.clientX - rect.left;
+    mouseY = e.clientY - rect.top;
+    
+    // Send mouse position to server for multiplayer
+    if (socket && myColor) {
+        socket.emit('mousePosition', { color: myColor, x: mouseX, y: mouseY });
+    }
+});
+
+
+
 // Game state
 let gameRunning = true;
 let bullets = [];
@@ -146,9 +167,34 @@ class Tank {
         this.x = Math.max(this.radius, Math.min(canvas.width - this.radius, this.x));
         this.y = Math.max(this.radius, Math.min(canvas.height - this.radius, this.y));
 
-        // Handle rotation (aiming)
-        if (this.controls.aimLeft()) this.angle -= 0.1;
-        if (this.controls.aimRight()) this.angle += 0.1;
+        // Handle rotation (aiming) - host controls red, viewer controls blue
+        if (myColor === 'red' && this.color === '#e74c3c') {
+            // Red player controls red tank
+            const dx = mouseX - this.x;
+            const dy = mouseY - this.y;
+            this.angle = Math.atan2(dy, dx);
+        } else if (myColor === 'blue' && this.color === '#3498db') {
+            // Blue player controls blue tank
+            const dx = mouseX - this.x;
+            const dy = mouseY - this.y;
+            this.angle = Math.atan2(dy, dx);
+        } else if (myColor === 'red' && this.color === '#3498db') {
+            // Red player can see blue tank aiming (for host)
+            const remotePos = remoteMousePositions['blue'];
+            if (remotePos) {
+                const dx = remotePos.x - this.x;
+                const dy = remotePos.y - this.y;
+                this.angle = Math.atan2(dy, dx);
+            }
+        } else if (myColor === 'blue' && this.color === '#e74c3c') {
+            // Blue player can see red tank aiming (for viewer)
+            const remotePos = remoteMousePositions['red'];
+            if (remotePos) {
+                const dx = remotePos.x - this.x;
+                const dy = remotePos.y - this.y;
+                this.angle = Math.atan2(dy, dx);
+            }
+        }
         
         // Auto-shoot
         this.autoShoot();
@@ -241,6 +287,14 @@ class Tank {
         
         // Draw power-up indicators
         this.drawPowerUpIndicators();
+        
+        // Draw cursor indicator for both tanks - both players can see both indicators
+        if ((myColor === 'red' && this.color === '#e74c3c') || 
+            (myColor === 'blue' && this.color === '#3498db') ||
+            (myColor === 'red' && this.color === '#3498db') ||
+            (myColor === 'blue' && this.color === '#e74c3c')) {
+            this.drawCursorIndicator();
+        }
     }
 
     drawHealthBar() {
@@ -327,6 +381,17 @@ class Tank {
         ctx.font = 'bold 14px Arial';
         ctx.textAlign = 'center';
         ctx.fillText(`${this.health}/${this.maxHealth}`, this.x, textY);
+    }
+    
+    drawCursorIndicator() {
+        // Draw a small cursor indicator near the tank
+        ctx.fillStyle = '#ffff00';
+        ctx.beginPath();
+        ctx.arc(this.x + this.radius + 15, this.y - this.radius - 15, 3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#000';
+        ctx.lineWidth = 1;
+        ctx.stroke();
     }
 }
 
@@ -609,16 +674,15 @@ if (typeof window !== 'undefined') {
     });
 }
 
-// Track local input state
+// Track local input state (removed aiming fields since we use cursor)
 const localInput = {
-    up: false, down: false, left: false, right: false,
-    aimLeft: false, aimRight: false, shoot: false
+    up: false, down: false, left: false, right: false, shoot: false
 };
 
-// Map keys to input fields for both players
+// Map keys to input fields for both players (removed aiming keys since we use cursor)
 const keyMap = {
-    red:    { up: 'w', down: 's', left: 'a', right: 'd', aimLeft: 'arrowleft', aimRight: 'arrowright', shoot: ' ' },
-    blue:   { up: 'arrowup', down: 'arrowdown', left: 'arrowleft', right: 'arrowright', aimLeft: 'q', aimRight: 'w', shoot: 'enter' }
+    red:    { up: 'w', down: 's', left: 'a', right: 'd', shoot: ' ' },
+    blue:   { up: 'arrowup', down: 'arrowdown', left: 'arrowleft', right: 'arrowright', shoot: 'enter' }
 };
 
 // Listen for keydown/keyup and update localInput
@@ -644,12 +708,33 @@ function sendInput() {
         socket.emit('playerInput', { color: myColor, input: { ...localInput } });
     }
 }
+
+// Send mouse position to server
+function sendMousePosition() {
+    if (socket && myColor) {
+        // Both host and viewers send their mouse position
+        socket.emit('mousePosition', { color: myColor, x: mouseX, y: mouseY });
+    }
+}
 setInterval(sendInput, 1000/120); // 120 times per second
+setInterval(sendMousePosition, 1000/60); // 60 times per second for mouse position
 
 // Receive remote input from server (by color)
 if (socket) {
     socket.on('playerInput', (data) => {
         remoteInputs[data.color] = data.input;
+    });
+    
+    // Receive remote mouse positions
+    socket.on('mousePosition', (data) => {
+        remoteMousePositions[data.color] = { x: data.x, y: data.y };
+    });
+    
+    // Handle mouse position messages from server
+    socket.on('viewerInput', (data) => {
+        if (data.data.color && data.data.x !== undefined && data.data.y !== undefined) {
+            remoteMousePositions[data.data.color] = { x: data.data.x, y: data.data.y };
+        }
     });
 }
 
@@ -662,8 +747,6 @@ function getMultiplayerControls(color) {
             down: () => localInput.down,
             left: () => localInput.left,
             right: () => localInput.right,
-            aimLeft: () => localInput.aimLeft,
-            aimRight: () => localInput.aimRight,
             shoot: () => localInput.shoot
         };
     } else {
@@ -673,8 +756,6 @@ function getMultiplayerControls(color) {
             down: () => remoteInputs[color]?.down,
             left: () => remoteInputs[color]?.left,
             right: () => remoteInputs[color]?.right,
-            aimLeft: () => remoteInputs[color]?.aimLeft,
-            aimRight: () => remoteInputs[color]?.aimRight,
             shoot: () => remoteInputs[color]?.shoot
         };
     }

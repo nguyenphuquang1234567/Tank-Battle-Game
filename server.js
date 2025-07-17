@@ -36,6 +36,17 @@ io.on('connection', (socket) => {
             io.to(hostId).emit('viewerInput', { socketId: socket.id, data });
         }
     });
+    
+    // Relay mouse position from viewers to host and vice versa
+    socket.on('mousePosition', (data) => {
+        if (socket.id !== hostId && hostId) {
+            // Viewer sending to host
+            io.to(hostId).emit('mousePosition', data);
+        } else if (socket.id === hostId) {
+            // Host broadcasting to all viewers
+            socket.broadcast.emit('mousePosition', data);
+        }
+    });
 
     // Relay game state from host to all viewers
     socket.on('gameState', (state) => {
