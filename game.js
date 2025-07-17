@@ -618,6 +618,10 @@ let latestGameState = null;
 let playerCount = 1;
 let waitingForPlayer = true;
 
+// --- Ping Indicator ---
+let ping = 0;
+let lastPingSent = 0;
+
 if (typeof io !== 'undefined') {
     socket = io({
         transports: ['websocket'],
@@ -660,10 +664,6 @@ if (typeof io !== 'undefined') {
         const { color, input } = payload.data;
         remoteInputs[color] = input;
     });
-    // --- Ping Indicator ---
-    let ping = 0;
-    let lastPingSent = 0;
-
     socket.on('pong', (sentTime) => {
         ping = Math.round(performance.now() - sentTime);
     });
