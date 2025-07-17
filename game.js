@@ -1118,7 +1118,9 @@ function update() {
     }
     // Update laser hazards
     laserHazards = laserHazards.filter(h => h.update());
-    // Laser hazard collision (only when firing)
+    // --- Laser hazard collision (only when firing) ---
+    // Track which MiniTanks were hit by the laser this frame
+    let miniTanksHitByLaser = new Set();
     laserHazards.forEach(hazard => {
         if (hazard.isFiring()) {
             // Tanks
@@ -1160,21 +1162,10 @@ function update() {
                 }
             });
             // MiniTanks
-            miniTanks.forEach(miniTank => {
-                if (miniTank.x > hazard.x - hazard.width/2 && miniTank.x < hazard.x + hazard.width/2) {
-                    const now = hazard.timer;
-                    const last = hazard.lastDamageFrame.get(miniTank) || -100;
-                    if (now - last >= 30) {
-                        miniTank.health -= hazard.damage;
-                        if (miniTank.health < 1) miniTank.health = 1; // Laser cannot destroy minitank
-                        hazard.lastDamageFrame.set(miniTank, now);
-                        effects.push(new BoomEffect(miniTank.x, miniTank.y, '#ff1744'));
-                        playBoomSound();
-                    }
-                }
-            });
+            // Laser beam does not affect MiniTanks
         }
     });
+    // (No need to clamp health for MiniTanks hit by laser, since they are not affected)
 
     // At the end of update, host sends state to server
     if (isHost && socket) {
