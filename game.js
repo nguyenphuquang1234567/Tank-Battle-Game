@@ -660,7 +660,21 @@ if (typeof io !== 'undefined') {
         const { color, input } = payload.data;
         remoteInputs[color] = input;
     });
+    // --- Ping Indicator ---
+    let ping = 0;
+    let lastPingSent = 0;
+
+    socket.on('pong', (sentTime) => {
+        ping = Math.round(performance.now() - sentTime);
+    });
 }
+
+setInterval(() => {
+    if (socket) {
+        lastPingSent = performance.now();
+        socket.emit('ping', lastPingSent);
+    }
+}, 1000); // Ping every second
 
 function maybeStartGame() {
     if (playerCount === 2 && hostId && myColor) {
@@ -1198,6 +1212,14 @@ function draw() {
         ctx.fillText('Waiting for another player...', canvas.width / 2, canvas.height / 2);
         ctx.restore();
     }
+
+    // Draw ping indicator
+    ctx.save();
+    ctx.font = '16px Arial';
+    ctx.fillStyle = '#fff';
+    ctx.textAlign = 'left';
+    ctx.fillText(`Ping: ${ping} ms`, 16, 28);
+    ctx.restore();
 
     if (!isHost) {
         // Interpolate tanks for smooth movement

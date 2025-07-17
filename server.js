@@ -64,6 +64,11 @@ io.on('connection', (socket) => {
         }
     });
 
+    // Custom ping-pong for latency measurement
+    socket.on('ping', (sentTime) => {
+        socket.emit('pong', sentTime);
+    });
+
     io.emit('playerCount', Object.keys(players).length);
 
     socket.on('disconnect', () => {
