@@ -198,9 +198,9 @@ class Tank {
     
     // Client-side prediction for smoother movement
     if (this.targetX !== undefined && this.targetY !== undefined) {
-        this.x = lerp(this.x, this.targetX, 0.3);
-        this.y = lerp(this.y, this.targetY, 0.3);
-        this.angle = lerp(this.angle, this.targetAngle, 0.3);
+        this.x = lerp(this.x, this.targetX, 0.2);
+        this.y = lerp(this.y, this.targetY, 0.2);
+        this.angle = lerp(this.angle, this.targetAngle, 0.2);
     }
         
         // Auto-shoot
