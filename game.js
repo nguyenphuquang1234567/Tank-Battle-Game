@@ -688,15 +688,15 @@ if (typeof window !== 'undefined') {
     });
 }
 
-// Track local input state (removed aiming fields since we use cursor)
+// Track local input state (removed shoot)
 const localInput = {
-    up: false, down: false, left: false, right: false, shoot: false
+    up: false, down: false, left: false, right: false
 };
 
-// Map keys to input fields for both players (removed aiming keys since we use cursor)
+// Map keys to input fields for both players (WASD for both, no shoot key)
 const keyMap = {
-    red:    { up: 'w', down: 's', left: 'a', right: 'd', shoot: ' ' },
-    blue:   { up: 'arrowup', down: 'arrowdown', left: 'arrowleft', right: 'arrowright', shoot: 'enter' }
+    red:    { up: 'w', down: 's', left: 'a', right: 'd' },
+    blue:   { up: 'w', down: 's', left: 'a', right: 'd' }
 };
 
 // Listen for keydown/keyup and update localInput
@@ -760,8 +760,7 @@ function getMultiplayerControls(color) {
             up:   () => localInput.up,
             down: () => localInput.down,
             left: () => localInput.left,
-            right: () => localInput.right,
-            shoot: () => localInput.shoot
+            right: () => localInput.right
         };
     } else {
         // Remote player controls
@@ -769,8 +768,7 @@ function getMultiplayerControls(color) {
             up:   () => remoteInputs[color]?.up,
             down: () => remoteInputs[color]?.down,
             left: () => remoteInputs[color]?.left,
-            right: () => remoteInputs[color]?.right,
-            shoot: () => remoteInputs[color]?.shoot
+            right: () => remoteInputs[color]?.right
         };
     }
 }
