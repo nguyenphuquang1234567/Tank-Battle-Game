@@ -62,6 +62,9 @@ let effects = [];
 // Add global miniTanks array
 let miniTanks = [];
 
+// Add global laserHazards array
+let laserHazards = [];
+
 // Boom effect class
 class BoomEffect {
     constructor(x, y, color) {
@@ -243,38 +246,48 @@ class Tank {
     }
 
     draw() {
-        // Draw tank body
         ctx.save();
         ctx.translate(this.x, this.y);
         ctx.rotate(this.angle);
-        // Tank body (circle)
-        // White rim for visibility
-        ctx.beginPath();
-        ctx.arc(0, 0, this.radius + 3, 0, Math.PI * 2);
-        ctx.strokeStyle = '#fff';
-        ctx.lineWidth = 5;
-        ctx.stroke();
-        // Main body
-        ctx.fillStyle = this.color;
+
+        // Outer glow
+        ctx.shadowColor = this.color;
+        ctx.shadowBlur = 18;
+
+        // Tank body with radial gradient
+        let grad = ctx.createRadialGradient(0, 0, this.radius * 0.3, 0, 0, this.radius);
+        grad.addColorStop(0, '#fff');
+        grad.addColorStop(0.5, this.color);
+        grad.addColorStop(1, '#222');
+        ctx.fillStyle = grad;
         ctx.beginPath();
         ctx.arc(0, 0, this.radius, 0, Math.PI * 2);
         ctx.fill();
+
+        // Barrel with highlight
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = '#333';
+        ctx.fillRect(0, -3, this.radius + 10, 6);
+        ctx.fillStyle = '#fff';
+        ctx.globalAlpha = 0.25;
+        ctx.fillRect(this.radius + 2, -2, 6, 4); // Barrel shine
+        ctx.globalAlpha = 1;
+
         // Tank outline
         ctx.strokeStyle = '#000';
         ctx.lineWidth = 2;
         ctx.stroke();
-        // Tank cannon (barrel)
-        ctx.fillStyle = '#333';
-        ctx.fillRect(0, -3, this.radius + 10, 6);
-        // Red flash effect (if hit)
+
+        // White flash effect if hit
         if (this.flashTimer > 0) {
             ctx.globalAlpha = 0.5 * (this.flashTimer / 10);
-            ctx.fillStyle = '#ffffff'; // White flash
+            ctx.fillStyle = '#ffffff';
             ctx.beginPath();
             ctx.arc(0, 0, this.radius + 2, 0, Math.PI * 2);
             ctx.fill();
             ctx.globalAlpha = 1;
         }
+
         ctx.restore();
 
         // Draw shield effect
@@ -497,21 +510,20 @@ class Meteor {
 
     draw() {
         ctx.save();
-        // Draw tail leaning to the right
-        const tailLength = this.radius * 2.5;
-        const tailOffset = this.radius * 0.8; // rightward offset
-        const tailGradient = ctx.createLinearGradient(this.x + tailOffset * 0.5, this.y - tailLength, this.x + tailOffset, this.y);
-        tailGradient.addColorStop(0, 'rgba(255, 140, 0, 0.0)');
-        tailGradient.addColorStop(1, 'rgba(255, 140, 0, 0.5)');
-        ctx.beginPath();
-        ctx.moveTo(this.x + tailOffset, this.y - tailLength);
-        ctx.lineTo(this.x - this.radius * 0.2 + tailOffset, this.y);
-        ctx.lineTo(this.x + this.radius * 0.8 + tailOffset, this.y);
-        ctx.closePath();
-        ctx.fillStyle = tailGradient;
-        ctx.fill();
 
-        // Draw meteor body with fiery gradient
+        // Glowing trail (more visible)
+        for (let i = 0; i < 16; i++) {
+            ctx.globalAlpha = 0.18 * (1 - i / 16);
+            ctx.beginPath();
+            ctx.arc(this.x - this.vx * i * 7, this.y - this.speed * i * 7, this.radius * (1.1 - i / 18), 0, Math.PI * 2);
+            ctx.fillStyle = '#ff6600';
+            ctx.shadowColor = '#ff6600';
+            ctx.shadowBlur = 36;
+            ctx.fill();
+        }
+
+        // Main meteor body with fiery gradient
+        ctx.globalAlpha = 1;
         const grad = ctx.createRadialGradient(this.x, this.y, this.radius * 0.3, this.x, this.y, this.radius);
         grad.addColorStop(0, '#fff6a0');
         grad.addColorStop(0.4, '#ff9933');
@@ -527,7 +539,7 @@ class Meteor {
         ctx.stroke();
         ctx.shadowBlur = 0;
 
-        // Draw highlight
+        // Highlight
         ctx.beginPath();
         ctx.arc(this.x - this.radius * 0.3, this.y - this.radius * 0.3, this.radius * 0.3, 0, Math.PI * 2);
         ctx.fillStyle = 'rgba(255,255,255,0.25)';
@@ -807,7 +819,8 @@ function serializeGameState() {
         m: meteors.map(m => [m.x, m.y, m.speed, m.radius, m.damage, m.active]),
         e: effects.map(e => [e.x, e.y, e.radius, e.maxRadius, e.alpha, e.color, e.done]),
         mt: miniTanks.map(m => [m.x, m.y, m.angle, m.color, m.health, m.lifetime, m.target ? m.target.color : null]),
-        l: [player1Lives, player2Lives, roundNumber, gameRunning, gameOverMessage, gameOverTimer, countdownActive, countdownValue, countdownTimer]
+        l: [player1Lives, player2Lives, roundNumber, gameRunning, gameOverMessage, gameOverTimer, countdownActive, countdownValue, countdownTimer],
+        lh: laserHazards.map(h => [h.x, h.state, h.timer]) // Serialize laser hazards
     };
 }
 
@@ -870,6 +883,14 @@ function applyGameState(state) {
     
     // Other state
     [player1Lives, player2Lives, roundNumber, gameRunning, gameOverMessage, gameOverTimer, countdownActive, countdownValue, countdownTimer] = state.l;
+
+    // Laser hazards
+    laserHazards = state.lh.map(h => {
+        const hazard = new LaserHazard(h[0]);
+        hazard.state = h[1];
+        hazard.timer = h[2];
+        return hazard;
+    });
 }
 
 // Update game state
@@ -970,7 +991,9 @@ function update() {
                         const opponent = tanks[1 - tankIndex];
                         const offsets = [-40, 0, 40];
                         for (let i = 0; i < 3; i++) {
-                            miniTanks.push(new MiniTank({ ...tank, x: tank.x + offsets[i], y: tank.y }, opponent));
+                            let miniColor = tank.color;
+                            if (tank.color === '#e74c3c') miniColor = '#ff7f7f'; // Light red for red tank's minitanks
+                            miniTanks.push(new MiniTank({ ...tank, x: tank.x + offsets[i], y: tank.y, color: miniColor }, opponent));
                         }
                         break;
                 }
@@ -1085,6 +1108,71 @@ function update() {
     }
     // Only remove MiniTanks with health <= 0 or expired
     miniTanks = miniTanks.filter(miniTank => !miniTank.isExpired());
+
+    // Spawn laser hazard randomly
+    if (Math.random() < 0.004) { // 0.4% chance per frame
+        const margin = 60;
+        const x = Math.random() * (canvas.width - 2 * margin) + margin;
+        laserHazards.push(new LaserHazard(x));
+    }
+    // Update laser hazards
+    laserHazards = laserHazards.filter(h => h.update());
+    // Laser hazard collision (only when firing)
+    laserHazards.forEach(hazard => {
+        if (hazard.isFiring()) {
+            // Tanks
+            tanks.forEach(tank => {
+                if (tank.x > hazard.x - hazard.width/2 && tank.x < hazard.x + hazard.width/2) {
+                    const now = hazard.timer;
+                    const last = hazard.lastDamageFrame.get(tank) || -100;
+                    if (now - last >= 30) { // 30 frames = 0.5s
+                        const destroyed = tank.takeDamage(hazard.damage);
+                        hazard.lastDamageFrame.set(tank, now);
+                        effects.push(new BoomEffect(tank.x, tank.y, '#ff1744'));
+                        playBoomSound();
+                        if (destroyed) {
+                            if (tanks[0] === tank) {
+                                player1Lives--;
+                            } else {
+                                player2Lives--;
+                            }
+                            effects.push(new BoomEffect(tank.x, tank.y, '#ff1744'));
+                            playBoomSound();
+                            if (player1Lives <= 0 || player2Lives <= 0) {
+                                gameRunning = false;
+                                const winner = player1Lives <= 0 ? 'Blue' : 'Red';
+                                gameOverMessage = `${winner} win`;
+                                gameOverTimer = 180;
+                                setTimeout(() => {
+                                    alert(`${winner} win`);
+                                    resetFullGame();
+                                }, 500);
+                            } else {
+                                gameRunning = false;
+                                const roundWinner = tanks[0] === tank ? 'Blue' : 'Red';
+                                gameOverMessage = `${roundWinner} win`;
+                                gameOverTimer = 120;
+                                roundNumber++;
+                            }
+                        }
+                    }
+                }
+            });
+            // MiniTanks
+            miniTanks.forEach(miniTank => {
+                if (miniTank.x > hazard.x - hazard.width/2 && miniTank.x < hazard.x + hazard.width/2) {
+                    const now = hazard.timer;
+                    const last = hazard.lastDamageFrame.get(miniTank) || -100;
+                    if (now - last >= 30) {
+                        miniTank.health -= hazard.damage;
+                        hazard.lastDamageFrame.set(miniTank, now);
+                        effects.push(new BoomEffect(miniTank.x, miniTank.y, '#ff1744'));
+                        playBoomSound();
+                    }
+                }
+            });
+        }
+    });
 
     // At the end of update, host sends state to server
     if (isHost && socket) {
@@ -1201,6 +1289,9 @@ function draw() {
     // Draw MiniTanks
     miniTanks.forEach(miniTank => miniTank.draw());
 
+    // Draw laser hazards
+    laserHazards.forEach(h => h.draw());
+
     // Show waiting overlay if not enough players
     if (waitingForPlayer) {
         ctx.save();
@@ -1299,6 +1390,7 @@ function resetRound() {
     tanks[1].flashTimer = 0;
 
     miniTanks = [];
+    laserHazards = []; // Clear laser hazards on round reset
 }
 
 // Start countdown for new round
@@ -1343,6 +1435,7 @@ function resetFullGame() {
     resetRound();
 
     miniTanks = [];
+    laserHazards = []; // Clear laser hazards on full reset
 }
 
 // MiniTank class
@@ -1353,7 +1446,7 @@ class MiniTank {
         this.x = owner.x;
         this.y = owner.y;
         this.radius = 12;
-        this.color = owner.color === '#e74c3c' ? '#ffb347' : '#85c1ff'; // Lighter shade
+        this.color = owner.color || (owner.color === '#e74c3c' ? '#ffb347' : '#85c1ff');
         this.angle = 0;
         this.speed = 3.5;
         this.health = 200; // Updated health
@@ -1382,6 +1475,7 @@ class MiniTank {
         }
         // Lifetime countdown
         this.lifetime--;
+        if (this.flashTimer > 0) this.flashTimer--;
     }
 
     shoot() {
@@ -1397,44 +1491,115 @@ class MiniTank {
         ctx.translate(this.x, this.y);
         ctx.rotate(this.angle);
         // Body
-        ctx.fillStyle = this.color;
         ctx.beginPath();
         ctx.arc(0, 0, this.radius, 0, Math.PI * 2);
+        ctx.fillStyle = this.color;
+        ctx.shadowColor = this.color;
+        ctx.shadowBlur = 10;
         ctx.fill();
-        ctx.strokeStyle = '#222';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-        // Cannon
-        ctx.fillStyle = '#555';
-        ctx.fillRect(0, -2, this.radius + 8, 4);
-        ctx.restore();
-        // Health bar
-        const barWidth = 30;
-        const barHeight = 5;
-        const barX = this.x - barWidth / 2;
-        const barY = this.y - this.radius - 14;
-        ctx.save();
-        ctx.fillStyle = '#333';
-        ctx.fillRect(barX, barY, barWidth, barHeight);
-        const healthPercent = Math.max(0, this.health / 200);
-        ctx.fillStyle = healthPercent > 0.5 ? '#2ecc71' : healthPercent > 0.25 ? '#f39c12' : '#e74c3c';
-        ctx.fillRect(barX, barY, barWidth * healthPercent, barHeight);
-        ctx.strokeStyle = '#fff';
-        ctx.lineWidth = 1;
-        ctx.strokeRect(barX, barY, barWidth, barHeight);
-        // Health number
-        ctx.font = 'bold 12px Arial';
-        ctx.fillStyle = '#fff';
-        ctx.textAlign = 'center';
+        ctx.shadowBlur = 0;
         ctx.strokeStyle = '#000';
         ctx.lineWidth = 2;
-        ctx.strokeText(`${Math.max(0, Math.round(this.health))}/200`, this.x, barY - 3);
-        ctx.fillText(`${Math.max(0, Math.round(this.health))}/200`, this.x, barY - 3);
+        ctx.stroke();
+        // Barrel
+        ctx.fillStyle = '#333';
+        ctx.fillRect(0, -2, this.radius + 7, 4);
+        // Eyes
+        ctx.fillStyle = '#fff';
+        ctx.beginPath();
+        ctx.arc(-5, -5, 2, 0, Math.PI * 2);
+        ctx.arc(-5, 5, 2, 0, Math.PI * 2);
+        ctx.fill();
+        // White flash effect if hit
+        if (this.flashTimer > 0) {
+            ctx.globalAlpha = 0.5 * (this.flashTimer / 10);
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(0, 0, this.radius + 2, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.globalAlpha = 1;
+        }
         ctx.restore();
     }
 
     isExpired() {
         return this.health <= 0;
+    }
+}
+
+// LaserHazard class
+class LaserHazard {
+    constructor(x) {
+        this.x = x;
+        this.state = 'warning'; // 'warning' or 'firing'
+        this.timer = 0;
+        this.warningDuration = 90; // 1.5 seconds at 60fps
+        this.laserDuration = 60; // 1 second at 60fps
+        this.width = 40; // Laser width in px
+        this.damage = 200; // Laser damage
+        this.lastDamageFrame = new Map(); // Map of target -> last frame damaged
+    }
+    update() {
+        this.timer++;
+        if (this.state === 'warning' && this.timer >= this.warningDuration) {
+            this.state = 'firing';
+            this.timer = 0;
+            playLaserSound();
+        } else if (this.state === 'firing' && this.timer >= this.laserDuration) {
+            return false; // Remove hazard
+        }
+        return true;
+    }
+    draw() {
+        if (this.state === 'warning') {
+            // Draw exclamation point at top and bottom
+            ctx.save();
+            ctx.font = 'bold 36px Arial';
+            ctx.fillStyle = '#ffeb3b';
+            ctx.textAlign = 'center';
+            ctx.fillText('!', this.x, 48);
+            ctx.fillText('!', this.x, canvas.height - 24);
+            // Draw warning line
+            ctx.strokeStyle = 'rgba(255,235,59,0.7)';
+            ctx.lineWidth = 6;
+            ctx.setLineDash([16, 16]);
+            ctx.beginPath();
+            ctx.moveTo(this.x, 0);
+            ctx.lineTo(this.x, canvas.height);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.restore();
+        } else if (this.state === 'firing') {
+            ctx.save();
+            // Outer glow
+            ctx.globalAlpha = 0.4;
+            ctx.shadowColor = '#ff1744';
+            ctx.shadowBlur = 60;
+            ctx.fillStyle = '#ff1744';
+            ctx.fillRect(this.x - this.width/2 - 10, 0, this.width + 20, canvas.height);
+
+            // Main beam (vertical gradient)
+            ctx.globalAlpha = 0.85;
+            ctx.shadowBlur = 0;
+            let grad = ctx.createLinearGradient(this.x, 0, this.x, canvas.height);
+            grad.addColorStop(0, '#fff');
+            grad.addColorStop(0.2, '#ffb3b3');
+            grad.addColorStop(0.5, '#ff1744');
+            grad.addColorStop(0.8, '#ffb3b3');
+            grad.addColorStop(1, '#fff');
+            ctx.fillStyle = grad;
+            ctx.fillRect(this.x - this.width/2, 0, this.width, canvas.height);
+
+            // Core
+            ctx.globalAlpha = 1;
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(this.x - 2, 0, 4, canvas.height);
+
+            ctx.restore();
+        }
+    }
+    isFiring() {
+        return this.state === 'firing';
     }
 }
 
@@ -1483,6 +1648,21 @@ function playPowerupSound() {
     g.connect(audioCtx.destination);
     o.start();
     o.stop(audioCtx.currentTime + 0.15);
+}
+
+// Add this function after playPowerupSound:
+function playLaserSound() {
+    if (!audioCtx) return;
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.type = 'triangle';
+    o.frequency.setValueAtTime(1800, audioCtx.currentTime);
+    o.frequency.linearRampToValueAtTime(400, audioCtx.currentTime + 0.25);
+    g.gain.value = 0.35;
+    o.connect(g);
+    g.connect(audioCtx.destination);
+    o.start();
+    o.stop(audioCtx.currentTime + 0.25);
 }
 
 // Add this near the top of the file, after audioCtx is defined:
