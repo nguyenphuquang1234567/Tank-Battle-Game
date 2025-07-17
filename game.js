@@ -167,34 +167,41 @@ class Tank {
         this.x = Math.max(this.radius, Math.min(canvas.width - this.radius, this.x));
         this.y = Math.max(this.radius, Math.min(canvas.height - this.radius, this.y));
 
-        // Handle rotation (aiming) - host controls red, viewer controls blue
-        if (myColor === 'red' && this.color === '#e74c3c') {
-            // Red player controls red tank
-            const dx = mouseX - this.x;
-            const dy = mouseY - this.y;
+            // Handle rotation (aiming) - host controls red, viewer controls blue
+    if (myColor === 'red' && this.color === '#e74c3c') {
+        // Red player controls red tank
+        const dx = mouseX - this.x;
+        const dy = mouseY - this.y;
+        this.angle = Math.atan2(dy, dx);
+    } else if (myColor === 'blue' && this.color === '#3498db') {
+        // Blue player controls blue tank
+        const dx = mouseX - this.x;
+        const dy = mouseY - this.y;
+        this.angle = Math.atan2(dy, dx);
+    } else if (myColor === 'red' && this.color === '#3498db') {
+        // Red player can see blue tank aiming (for host)
+        const remotePos = remoteMousePositions['blue'];
+        if (remotePos) {
+            const dx = remotePos.x - this.x;
+            const dy = remotePos.y - this.y;
             this.angle = Math.atan2(dy, dx);
-        } else if (myColor === 'blue' && this.color === '#3498db') {
-            // Blue player controls blue tank
-            const dx = mouseX - this.x;
-            const dy = mouseY - this.y;
-            this.angle = Math.atan2(dy, dx);
-        } else if (myColor === 'red' && this.color === '#3498db') {
-            // Red player can see blue tank aiming (for host)
-            const remotePos = remoteMousePositions['blue'];
-            if (remotePos) {
-                const dx = remotePos.x - this.x;
-                const dy = remotePos.y - this.y;
-                this.angle = Math.atan2(dy, dx);
-            }
-        } else if (myColor === 'blue' && this.color === '#e74c3c') {
-            // Blue player can see red tank aiming (for viewer)
-            const remotePos = remoteMousePositions['red'];
-            if (remotePos) {
-                const dx = remotePos.x - this.x;
-                const dy = remotePos.y - this.y;
-                this.angle = Math.atan2(dy, dx);
-            }
         }
+    } else if (myColor === 'blue' && this.color === '#e74c3c') {
+        // Blue player can see red tank aiming (for viewer)
+        const remotePos = remoteMousePositions['red'];
+        if (remotePos) {
+            const dx = remotePos.x - this.x;
+            const dy = remotePos.y - this.y;
+            this.angle = Math.atan2(dy, dx);
+        }
+    }
+    
+    // Client-side prediction for smoother movement
+    if (this.targetX !== undefined && this.targetY !== undefined) {
+        this.x = lerp(this.x, this.targetX, 0.3);
+        this.y = lerp(this.y, this.targetY, 0.3);
+        this.angle = lerp(this.angle, this.targetAngle, 0.3);
+    }
         
         // Auto-shoot
         this.autoShoot();
@@ -612,7 +619,14 @@ let playerCount = 1;
 let waitingForPlayer = true;
 
 if (typeof io !== 'undefined') {
-    socket = io();
+    socket = io({
+        transports: ['websocket'],
+        forceNew: true,
+        timeout: 5000,
+        reconnection: true,
+        reconnectionDelay: 100,
+        reconnectionAttempts: 5
+    });
     socket.on('playerColor', (color) => {
         myColor = color;
         console.log('Assigned color:', color);
@@ -716,8 +730,8 @@ function sendMousePosition() {
         socket.emit('mousePosition', { color: myColor, x: mouseX, y: mouseY });
     }
 }
-setInterval(sendInput, 1000/120); // 120 times per second
-setInterval(sendMousePosition, 1000/60); // 60 times per second for mouse position
+setInterval(sendInput, 1000/240); // 240 times per second (4ms intervals)
+setInterval(sendMousePosition, 1000/200); // 200 times per second (5ms intervals)
 
 // Receive remote input from server (by color)
 if (socket) {
@@ -772,20 +786,16 @@ function initTanks() {
     tanks[1].angle = 0;
 }
 
-// Serialize game state for sending to viewers
+// Serialize game state for sending to viewers (optimized for low latency)
 function serializeGameState() {
     return {
-        tanks: tanks.map(t => ({
-            x: t.x, y: t.y, angle: t.angle, color: t.color, health: t.health, maxHealth: t.maxHealth,
-            speedBoost: t.speedBoost, rapidFire: t.rapidFire, shield: t.shield, multishot: t.multishot,
-            flashTimer: t.flashTimer
-        })),
-        bullets: bullets.map(b => ({ x: b.x, y: b.y, vx: b.vx, vy: b.vy, color: b.color, damage: b.damage })),
-        powerUps: powerUps.map(p => ({ x: p.x, y: p.y, type: p.type, life: p.life })),
-        meteors: meteors.map(m => ({ x: m.x, y: m.y, speed: m.speed, radius: m.radius, damage: m.damage, active: m.active })),
-        effects: effects.map(e => ({ x: e.x, y: e.y, radius: e.radius, maxRadius: e.maxRadius, alpha: e.alpha, color: e.color, done: e.done })),
-        miniTanks: miniTanks.map(m => ({ x: m.x, y: m.y, angle: m.angle, color: m.color, health: m.health, lifetime: m.lifetime, target: m.target ? (m.target.color) : null })),
-        player1Lives, player2Lives, roundNumber, gameRunning, gameOverMessage, gameOverTimer, countdownActive, countdownValue, countdownTimer
+        t: tanks.map(t => [t.x, t.y, t.angle, t.color, t.health, t.maxHealth, t.speedBoost, t.rapidFire, t.shield, t.multishot, t.flashTimer]),
+        b: bullets.map(b => [b.x, b.y, b.vx, b.vy, b.color, b.damage]),
+        p: powerUps.map(p => [p.x, p.y, p.type, p.life]),
+        m: meteors.map(m => [m.x, m.y, m.speed, m.radius, m.damage, m.active]),
+        e: effects.map(e => [e.x, e.y, e.radius, e.maxRadius, e.alpha, e.color, e.done]),
+        mt: miniTanks.map(m => [m.x, m.y, m.angle, m.color, m.health, m.lifetime, m.target ? m.target.color : null]),
+        l: [player1Lives, player2Lives, roundNumber, gameRunning, gameOverMessage, gameOverTimer, countdownActive, countdownValue, countdownTimer]
     };
 }
 
@@ -793,57 +803,61 @@ function lerp(a, b, t) {
     return a + (b - a) * t;
 }
 
-// Deserialize game state for viewers
+// Deserialize game state for viewers (optimized for low latency)
 function applyGameState(state) {
     // Only update if state is present
     if (!state) return;
+    
     // Tanks
-    if (!tanks || tanks.length !== state.tanks.length) {
+    if (!tanks || tanks.length !== state.t.length) {
         // First time or tank count changed: create tanks at correct positions
-        tanks = state.tanks.map(t => {
-            const tank = new Tank(t.x, t.y, t.color, getMultiplayerControls(t.color));
-            tank.targetX = t.x;
-            tank.targetY = t.y;
-            tank.targetAngle = t.angle;
-            return Object.assign(tank, t);
+        tanks = state.t.map(t => {
+            const tank = new Tank(t[0], t[1], t[3], getMultiplayerControls(t[3]));
+            tank.targetX = t[0];
+            tank.targetY = t[1];
+            tank.targetAngle = t[2];
+            tank.health = t[4];
+            tank.maxHealth = t[5];
+            tank.speedBoost = t[6];
+            tank.rapidFire = t[7];
+            tank.shield = t[8];
+            tank.multishot = t[9];
+            tank.flashTimer = t[10];
+            return tank;
         });
     } else {
         // Update targets for interpolation
-        state.tanks.forEach((t, i) => {
-            tanks[i].targetX = t.x;
-            tanks[i].targetY = t.y;
-            tanks[i].targetAngle = t.angle;
-            // Update other properties as needed
-            tanks[i].health = t.health;
-            tanks[i].maxHealth = t.maxHealth;
-            tanks[i].color = t.color;
-            tanks[i].speedBoost = t.speedBoost;
-            tanks[i].rapidFire = t.rapidFire;
-            tanks[i].shield = t.shield;
-            tanks[i].multishot = t.multishot;
-            tanks[i].flashTimer = t.flashTimer;
+        state.t.forEach((t, i) => {
+            tanks[i].targetX = t[0];
+            tanks[i].targetY = t[1];
+            tanks[i].targetAngle = t[2];
+            tanks[i].health = t[4];
+            tanks[i].maxHealth = t[5];
+            tanks[i].speedBoost = t[6];
+            tanks[i].rapidFire = t[7];
+            tanks[i].shield = t[8];
+            tanks[i].multishot = t[9];
+            tanks[i].flashTimer = t[10];
         });
     }
+    
     // Bullets
-    bullets = state.bullets.map(b => Object.assign(new Bullet(b.x, b.y, b.vx, b.vy, b.color, b.damage), b));
+    bullets = state.b.map(b => Object.assign(new Bullet(b[0], b[1], b[2], b[3], b[4], b[5]), { x: b[0], y: b[1], vx: b[2], vy: b[3], color: b[4], damage: b[5] }));
+    
     // PowerUps
-    powerUps = state.powerUps.map(p => Object.assign(new PowerUp(p.x, p.y, p.type), p));
+    powerUps = state.p.map(p => Object.assign(new PowerUp(p[0], p[1], p[2]), { x: p[0], y: p[1], type: p[2], life: p[3] }));
+    
     // Meteors
-    meteors = state.meteors.map(m => Object.assign(new Meteor(m.x, m.y, m.speed, m.radius, m.damage), m));
+    meteors = state.m.map(m => Object.assign(new Meteor(m[0], m[1], m[2], m[3], m[4]), { x: m[0], y: m[1], speed: m[2], radius: m[3], damage: m[4], active: m[5] }));
+    
     // Effects
-    effects = state.effects.map(e => Object.assign(new BoomEffect(e.x, e.y, e.color), e));
+    effects = state.e.map(e => Object.assign(new BoomEffect(e[0], e[1], e[5]), { x: e[0], y: e[1], radius: e[2], maxRadius: e[3], alpha: e[4], color: e[5], done: e[6] }));
+    
     // MiniTanks
-    miniTanks = state.miniTanks.map(m => Object.assign(new MiniTank({ x: m.x, y: m.y, color: m.color }, { color: m.target }), m));
+    miniTanks = state.mt.map(m => Object.assign(new MiniTank({ x: m[0], y: m[1], color: m[3] }, { color: m[6] }), { x: m[0], y: m[1], angle: m[2], color: m[3], health: m[4], lifetime: m[5], target: m[6] }));
+    
     // Other state
-    player1Lives = state.player1Lives;
-    player2Lives = state.player2Lives;
-    roundNumber = state.roundNumber;
-    gameRunning = state.gameRunning;
-    gameOverMessage = state.gameOverMessage;
-    gameOverTimer = state.gameOverTimer;
-    countdownActive = state.countdownActive;
-    countdownValue = state.countdownValue;
-    countdownTimer = state.countdownTimer;
+    [player1Lives, player2Lives, roundNumber, gameRunning, gameOverMessage, gameOverTimer, countdownActive, countdownValue, countdownTimer] = state.l;
 }
 
 // Update game state

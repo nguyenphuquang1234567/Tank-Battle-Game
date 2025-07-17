@@ -4,7 +4,16 @@ const { Server } = require('socket.io');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
+const io = new Server(server, {
+    pingTimeout: 5000,
+    pingInterval: 1000,
+    transports: ['websocket'], // Force WebSocket only, no polling
+    allowEIO3: true,
+    cors: {
+        origin: "*",
+        methods: ["GET", "POST"]
+    }
+});
 
 // Serve static files (your game) from the current directory
 app.use(express.static(__dirname));
@@ -72,6 +81,11 @@ io.on('connection', (socket) => {
     });
 });
 
+// Optimize server for low latency
+server.keepAliveTimeout = 0;
+server.headersTimeout = 0;
+
 server.listen(3000, () => {
     console.log('Tank game server running on http://localhost:3000');
+    console.log('Optimized for low latency (5ms target)');
 }); 
