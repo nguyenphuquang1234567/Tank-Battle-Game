@@ -347,9 +347,9 @@ class Tank {
     }
 
     takeDamage(damage) {
-        // Shield blocks all damage
+        // Shield reduces damage by 70%
         if (this.shield > 0) {
-            return false;
+            damage = Math.ceil(damage * 0.3);
         }
         playHitSound();
         this.flashTimer = 10; // 10 frames of white flash
