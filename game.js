@@ -832,10 +832,36 @@ function lerp(a, b, t) {
     return a + (b - a) * t;
 }
 
+// --- Sound effect triggers for viewers ---
+let previousState = null;
+
 // Deserialize game state for viewers (optimized for low latency)
 function applyGameState(state) {
     // Only update if state is present
     if (!state) return;
+    // --- Sound effect triggers for viewers ---
+    if (previousState && typeof window !== 'undefined') {
+        // 1. Tank hit or destroyed
+        for (let i = 0; i < state.t.length; i++) {
+            const prevTank = previousState.t[i];
+            const currTank = state.t[i];
+            if (prevTank && currTank) {
+                if (currTank[4] < prevTank[4]) {
+                    playHitSound();
+                    if (currTank[4] <= 0 && prevTank[4] > 0) {
+                        playBoomSound();
+                    }
+                }
+            }
+        }
+        // 2. Power-up picked up (power-up count decreases)
+        if (state.p.length < previousState.p.length) {
+            playPowerupSound();
+        }
+        // 3. Meteor or laser boom effect (optional: if new effect added)
+        // Could add more detailed checks if desired
+    }
+    previousState = JSON.parse(JSON.stringify(state)); // Deep copy for next frame
     
     // Tanks
     if (!tanks || tanks.length !== state.t.length) {
