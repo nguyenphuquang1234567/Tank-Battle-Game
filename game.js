@@ -1,3 +1,7 @@
+// Load background image (define at the very top)
+const bgImage = new Image();
+bgImage.src = 'assets/background.png';
+
 // Game canvas and context
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
@@ -1175,25 +1179,12 @@ function update() {
 
 // Draw everything
 function draw() {
-    //console.log('draw called');
-    // Clear canvas
-    ctx.fillStyle = '#27ae60';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    
-    // Draw grid pattern
-    ctx.strokeStyle = '#2d5a2d';
-    ctx.lineWidth = 1;
-    for (let x = 0; x < canvas.width; x += 40) {
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, canvas.height);
-        ctx.stroke();
-    }
-    for (let y = 0; y < canvas.height; y += 40) {
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(canvas.width, y);
-        ctx.stroke();
+    // Draw background image, stretched to fit canvas
+    if (bgImage.complete && bgImage.naturalWidth > 0) {
+        ctx.drawImage(bgImage, 0, 0, canvas.width, canvas.height);
+    } else {
+        ctx.fillStyle = '#000'; // fallback color
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
     }
     
     // Draw tanks
