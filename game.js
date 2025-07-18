@@ -736,6 +736,7 @@ window.addEventListener('keydown', (e) => {
     for (const action in mapping) {
         if (e.key.toLowerCase() === mapping[action]) localInput[action] = true;
     }
+    sendInput(); // Send input immediately on keydown
 });
 window.addEventListener('keyup', (e) => {
     if (!myColor) return;
@@ -743,6 +744,7 @@ window.addEventListener('keyup', (e) => {
     for (const action in mapping) {
         if (e.key.toLowerCase() === mapping[action]) localInput[action] = false;
     }
+    sendInput(); // Send input immediately on keyup
 });
 
 // Send local input to server (with color)
