@@ -1353,9 +1353,38 @@ function gameLoop() {
     } else {
         applyGameState(latestGameState);
 
-        // Client-side prediction for blue player
+        // Improved client-side prediction for blue player
         if (gameRunning && myColor === 'blue' && tanks && tanks.length > 1) {
-            tanks[1].update(); // Only update blue tank with local input
+            // Save previous position for smoothing
+            const tank = tanks[1];
+            const prevX = tank.x;
+            const prevY = tank.y;
+            const prevAngle = tank.angle;
+            // Update with local input
+            tank.update();
+            // Interpolate toward host state if available
+            if (typeof tank.targetX === 'number' && typeof tank.targetY === 'number') {
+                // If the difference is large, snap to host state
+                const dx = tank.targetX - tank.x;
+                const dy = tank.targetY - tank.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist > 80) {
+                    tank.x = tank.targetX;
+                    tank.y = tank.targetY;
+                } else {
+                    tank.x = lerp(tank.x, tank.targetX, 0.2);
+                    tank.y = lerp(tank.y, tank.targetY, 0.2);
+                }
+                // Angle smoothing
+                let da = tank.targetAngle - tank.angle;
+                while (da > Math.PI) da -= 2 * Math.PI;
+                while (da < -Math.PI) da += 2 * Math.PI;
+                if (Math.abs(da) > Math.PI / 2) {
+                    tank.angle = tank.targetAngle;
+                } else {
+                    tank.angle = tank.angle + da * 0.2;
+                }
+            }
         }
 
         draw();
