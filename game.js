@@ -699,10 +699,10 @@ function maybeStartGame() {
             if (isHost) {
                 console.log('I am the host, calling initTanks and gameLoop');
                 initTanks();
-                gameLoop();
+                gameLoop(performance.now());
             } else {
                 console.log('I am a viewer, calling gameLoop');
-                gameLoop();
+                gameLoop(performance.now());
             }
         }
     }
@@ -1342,13 +1342,17 @@ function draw() {
     }
 }
 
-// Game loop runs at ~60Hz via requestAnimationFrame
-// Frame rate optimization for high latency
-let frameSkipCounter = 0;
-let targetFrameRate = 60;
+// Game loop runs at 90fps via requestAnimationFrame
+// 90fps game loop with consistent frame rate
+let lastFrameTime = 0;
+const targetFrameTime = 1000 / 90; // 11.11ms for 90fps
 
-function gameLoop() {
+function gameLoop(currentTime) {
     //console.log('gameLoop called, isHost:', isHost);
+    
+    // Calculate delta time for smooth 90fps
+    const deltaTime = currentTime - lastFrameTime;
+    
     if (isHost) {
         if (gameRunning) {
             update();
@@ -1356,16 +1360,11 @@ function gameLoop() {
             updateCountdown();
         }
         draw();
+        lastFrameTime = currentTime;
         requestAnimationFrame(gameLoop);
     } else {
-        // Adaptive frame rate based on ping for viewers
-        frameSkipCounter++;
-        const skipFrames = Math.min(3, Math.floor(ping / 50)); // Skip 0-3 frames based on ping
-        const shouldUpdate = frameSkipCounter % (1 + skipFrames) === 0;
-        
-        if (shouldUpdate) {
-            applyGameState(latestGameState);
-        }
+        // Always update at 90fps regardless of network conditions
+        applyGameState(latestGameState);
 
         // Improved client-side prediction for blue player
         if (gameRunning && myColor === 'blue' && tanks && tanks.length > 1) {
@@ -1404,6 +1403,7 @@ function gameLoop() {
         }
 
         draw();
+        lastFrameTime = currentTime;
         requestAnimationFrame(gameLoop);
     }
 }
