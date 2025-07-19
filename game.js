@@ -1325,17 +1325,18 @@ function draw() {
     ctx.restore();
 
     if (!isHost) {
-        // Interpolate tanks for smooth movement
+        // Adaptive interpolation based on ping for smoother movement
+        const interpolationFactor = Math.min(0.4, Math.max(0.1, 0.2 + (ping / 1000))); // Adaptive: 0.1-0.4 based on ping
         tanks.forEach(tank => {
             if (typeof tank.targetX === 'number' && typeof tank.targetY === 'number') {
-                tank.x = lerp(tank.x, tank.targetX, 0.2); // Set to 0.2 for balance
-                tank.y = lerp(tank.y, tank.targetY, 0.2);
+                tank.x = lerp(tank.x, tank.targetX, interpolationFactor);
+                tank.y = lerp(tank.y, tank.targetY, interpolationFactor);
             }
             if (typeof tank.targetAngle === 'number') {
                 let da = tank.targetAngle - tank.angle;
                 while (da > Math.PI) da -= 2 * Math.PI;
                 while (da < -Math.PI) da += 2 * Math.PI;
-                tank.angle = tank.angle + da * 0.2; // Set to 0.2 for balance
+                tank.angle = tank.angle + da * interpolationFactor;
             }
         });
     }
@@ -1374,8 +1375,9 @@ function gameLoop() {
                     tank.x = tank.targetX;
                     tank.y = tank.targetY;
                 } else {
-                    tank.x = lerp(tank.x, tank.targetX, 0.2);
-                    tank.y = lerp(tank.y, tank.targetY, 0.2);
+                    const interpolationFactor = Math.min(0.4, Math.max(0.1, 0.2 + (ping / 1000)));
+                    tank.x = lerp(tank.x, tank.targetX, interpolationFactor);
+                    tank.y = lerp(tank.y, tank.targetY, interpolationFactor);
                 }
                 // Angle smoothing
                 let da = tank.targetAngle - tank.angle;
@@ -1384,7 +1386,8 @@ function gameLoop() {
                 if (Math.abs(da) > Math.PI / 2) {
                     tank.angle = tank.targetAngle;
                 } else {
-                    tank.angle = tank.angle + da * 0.2;
+                    const interpolationFactor = Math.min(0.4, Math.max(0.1, 0.2 + (ping / 1000)));
+                    tank.angle = tank.angle + da * interpolationFactor;
                 }
             }
         }
