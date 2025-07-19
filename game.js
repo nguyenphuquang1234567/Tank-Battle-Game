@@ -1342,15 +1342,15 @@ function draw() {
     }
 }
 
-// Game loop runs at 90fps via requestAnimationFrame
-// 90fps game loop with consistent frame rate
+// Game loop runs at 60fps via requestAnimationFrame
+// 60fps game loop with consistent frame rate
 let lastFrameTime = 0;
-const targetFrameTime = 1000 / 90; // 11.11ms for 90fps
+const targetFrameTime = 1000 / 60; // 16.67ms for 60fps
 
 function gameLoop(currentTime) {
     //console.log('gameLoop called, isHost:', isHost);
     
-    // Calculate delta time for smooth 90fps
+    // Calculate delta time for smooth 60fps
     const deltaTime = currentTime - lastFrameTime;
     
     if (isHost) {
@@ -1363,7 +1363,7 @@ function gameLoop(currentTime) {
         lastFrameTime = currentTime;
         requestAnimationFrame(gameLoop);
     } else {
-        // Always update at 90fps regardless of network conditions
+        // Always update at 60fps regardless of network conditions
         applyGameState(latestGameState);
 
         // Improved client-side prediction for blue player
