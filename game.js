@@ -1343,6 +1343,10 @@ function draw() {
 }
 
 // Game loop runs at ~60Hz via requestAnimationFrame
+// Frame rate optimization for high latency
+let frameSkipCounter = 0;
+let targetFrameRate = 60;
+
 function gameLoop() {
     //console.log('gameLoop called, isHost:', isHost);
     if (isHost) {
@@ -1354,7 +1358,14 @@ function gameLoop() {
         draw();
         requestAnimationFrame(gameLoop);
     } else {
-        applyGameState(latestGameState);
+        // Adaptive frame rate based on ping for viewers
+        frameSkipCounter++;
+        const skipFrames = Math.min(3, Math.floor(ping / 50)); // Skip 0-3 frames based on ping
+        const shouldUpdate = frameSkipCounter % (1 + skipFrames) === 0;
+        
+        if (shouldUpdate) {
+            applyGameState(latestGameState);
+        }
 
         // Improved client-side prediction for blue player
         if (gameRunning && myColor === 'blue' && tanks && tanks.length > 1) {
