@@ -25,6 +25,10 @@ let mouseY = 0;
 // Track remote mouse positions for multiplayer
 let remoteMousePositions = {};
 
+// Game mode variables
+let gameMode = null; // 'multiplayer' or 'ai'
+let aiTank = null; // Reference to the AI tank
+
 // Track mouse movement for cursor aiming
 canvas.addEventListener('mousemove', (e) => {
     const rect = canvas.getBoundingClientRect();
@@ -32,12 +36,10 @@ canvas.addEventListener('mousemove', (e) => {
     mouseY = e.clientY - rect.top;
     
     // Send mouse position to server for multiplayer
-    if (socket && myColor) {
+    if (socket && myColor && gameMode === 'multiplayer') {
         socket.emit('mousePosition', { color: myColor, x: mouseX, y: mouseY });
     }
 });
-
-
 
 // Game state
 let gameRunning = true;
@@ -68,6 +70,9 @@ let miniTanks = [];
 
 // Add global laserHazards array
 let laserHazards = [];
+
+// Game loop timing
+let lastFrameTime = 0;
 
 // Boom effect class
 class BoomEffect {
@@ -165,50 +170,82 @@ class Tank {
         }
         
         // Handle movement
-        if (this.controls.up()) this.y -= this.speed;
-        if (this.controls.down()) this.y += this.speed;
-        if (this.controls.left()) this.x -= this.speed;
-        if (this.controls.right()) this.x += this.speed;
+        if (this.controls.up()) {
+            this.y -= this.speed;
+            if (gameMode === 'ai' && this.color === '#e74c3c') {
+                console.log('Red tank moving up');
+            }
+        }
+        if (this.controls.down()) {
+            this.y += this.speed;
+            if (gameMode === 'ai' && this.color === '#e74c3c') {
+                console.log('Red tank moving down');
+            }
+        }
+        if (this.controls.left()) {
+            this.x -= this.speed;
+            if (gameMode === 'ai' && this.color === '#e74c3c') {
+                console.log('Red tank moving left');
+            }
+        }
+        if (this.controls.right()) {
+            this.x += this.speed;
+            if (gameMode === 'ai' && this.color === '#e74c3c') {
+                console.log('Red tank moving right');
+            }
+        }
 
         // Keep tank within bounds
         this.x = Math.max(this.radius, Math.min(canvas.width - this.radius, this.x));
         this.y = Math.max(this.radius, Math.min(canvas.height - this.radius, this.y));
 
-            // Handle rotation (aiming) - host controls red, viewer controls blue
-    if (myColor === 'red' && this.color === '#e74c3c') {
-        // Red player controls red tank
-        const dx = mouseX - this.x;
-        const dy = mouseY - this.y;
-        this.angle = Math.atan2(dy, dx);
-    } else if (myColor === 'blue' && this.color === '#3498db') {
-        // Blue player controls blue tank
-        const dx = mouseX - this.x;
-        const dy = mouseY - this.y;
-        this.angle = Math.atan2(dy, dx);
-    } else if (myColor === 'red' && this.color === '#3498db') {
-        // Red player can see blue tank aiming (for host)
-        const remotePos = remoteMousePositions['blue'];
-        if (remotePos) {
-            const dx = remotePos.x - this.x;
-            const dy = remotePos.y - this.y;
-            this.angle = Math.atan2(dy, dx);
+        // Handle rotation (aiming) - different logic for multiplayer vs AI
+        if (gameMode === 'multiplayer') {
+            // Multiplayer aiming logic
+            if (myColor === 'red' && this.color === '#e74c3c') {
+                // Red player controls red tank
+                const dx = mouseX - this.x;
+                const dy = mouseY - this.y;
+                this.angle = Math.atan2(dy, dx);
+            } else if (myColor === 'blue' && this.color === '#3498db') {
+                // Blue player controls blue tank
+                const dx = mouseX - this.x;
+                const dy = mouseY - this.y;
+                this.angle = Math.atan2(dy, dx);
+            } else if (myColor === 'red' && this.color === '#3498db') {
+                // Red player can see blue tank aiming (for host)
+                const remotePos = remoteMousePositions['blue'];
+                if (remotePos) {
+                    const dx = remotePos.x - this.x;
+                    const dy = remotePos.y - this.y;
+                    this.angle = Math.atan2(dy, dx);
+                }
+            } else if (myColor === 'blue' && this.color === '#e74c3c') {
+                // Blue player can see red tank aiming (for viewer)
+                const remotePos = remoteMousePositions['red'];
+                if (remotePos) {
+                    const dx = remotePos.x - this.x;
+                    const dy = remotePos.y - this.y;
+                    this.angle = Math.atan2(dy, dx);
+                }
+            }
+        } else if (gameMode === 'ai') {
+            // AI mode aiming logic
+            if (this.color === '#e74c3c') {
+                // Player tank (red) - use mouse aiming
+                const dx = mouseX - this.x;
+                const dy = mouseY - this.y;
+                this.angle = Math.atan2(dy, dx);
+            }
+            // AI tank aiming is handled in AI update logic
         }
-    } else if (myColor === 'blue' && this.color === '#e74c3c') {
-        // Blue player can see red tank aiming (for viewer)
-        const remotePos = remoteMousePositions['red'];
-        if (remotePos) {
-            const dx = remotePos.x - this.x;
-            const dy = remotePos.y - this.y;
-            this.angle = Math.atan2(dy, dx);
-        }
-    }
     
-    // Client-side prediction for smoother movement
-    if (this.targetX !== undefined && this.targetY !== undefined) {
-        this.x = lerp(this.x, this.targetX, 0.2);
-        this.y = lerp(this.y, this.targetY, 0.2);
-        this.angle = lerp(this.angle, this.targetAngle, 0.2);
-    }
+        // Client-side prediction for smoother movement (multiplayer only)
+        if (gameMode === 'multiplayer' && this.targetX !== undefined && this.targetY !== undefined) {
+            this.x = lerp(this.x, this.targetX, 0.2);
+            this.y = lerp(this.y, this.targetY, 0.2);
+            this.angle = lerp(this.angle, this.targetAngle, 0.2);
+        }
         
         // Auto-shoot
         this.autoShoot();
@@ -634,65 +671,559 @@ let latestGameState = null;
 let playerCount = 1;
 let waitingForPlayer = true;
 
+// --- AI Controls ---
+let aiInput = {
+    up: false, down: false, left: false, right: false
+};
+
+// AI behavior variables
+let aiTargetDistance = 150; // Preferred distance from player
+let aiStrafeDirection = 1; // 1 for right, -1 for left
+let aiStrafeTimer = 0;
+let aiStrafeInterval = 120; // Change direction every 2 seconds
+let aiReactionDelay = 0; // Random delay for shooting
+let aiReactionTimer = 0;
+
+// Enhanced AI variables
+let aiState = 'hunt'; // hunt, retreat, aggressive, defensive, powerup
+let aiStateTimer = 0;
+let aiStateDuration = 180; // 3 seconds at 60fps
+let aiHealthThreshold = 0.3; // Switch to defensive when health < 30%
+let aiAggressiveThreshold = 0.7; // Switch to aggressive when health > 70%
+let aiLastKnownPlayerPos = { x: 0, y: 0 };
+let aiPredictionTimer = 0;
+let aiPredictionInterval = 30; // Update player prediction every 0.5 seconds
+let aiCoverTimer = 0;
+let aiCoverInterval = 120; // Find cover every 2 seconds
+let aiCoverPosition = null;
+let aiBulletMemory = []; // Remember recent bullet patterns
+let aiPatternRecognition = {
+    playerStrafePattern: [],
+    playerShootPattern: [],
+    playerMovementPattern: []
+};
+let aiDifficulty = 0.8; // 0.0 = easy, 1.0 = hard
+let aiAdaptiveTimer = 0;
+let aiAdaptiveInterval = 600; // Adapt difficulty every 10 seconds
+
 // --- Ping Indicator ---
 let ping = 0;
 let lastPingSent = 0;
 
-if (typeof io !== 'undefined') {
-    socket = io({
-        transports: ['websocket'],
-        forceNew: true,
-        timeout: 5000,
-        reconnection: true,
-        reconnectionDelay: 100,
-        reconnectionAttempts: 5
-    });
-    socket.on('playerColor', (color) => {
-        myColor = color;
-        console.log('Assigned color:', color);
-    });
-    socket.on('hostId', (id) => {
-        hostId = id;
-        isHost = (socket.id === hostId);
-        console.log('Received hostId:', hostId, 'Am I host?', isHost);
-        maybeStartGame();
-    });
-    socket.on('playerCount', (count) => {
-        playerCount = count;
-        waitingForPlayer = (count < 2);
-        maybeStartGame();
-    });
-    socket.on('connect', () => {
-        mySocketId = socket.id;
-        console.log('Connected with socket id:', mySocketId);
-    });
-    socket.on('playerDisconnected', () => {
-        alert('A player disconnected. Reloading...');
-        location.reload();
-    });
-    // Viewers receive game state from host
-    socket.on('gameState', (state) => {
-        latestGameState = state;
-    });
-    // Host receives input from viewers
-    socket.on('viewerInput', (payload) => {
-        if (!isHost) return;
-        const { color, input } = payload.data;
-        remoteInputs[color] = input;
-    });
-    socket.on('pong', (sentTime) => {
-        ping = Math.round(performance.now() - sentTime);
+// Socket setup is now handled in startMultiplayerMode()
+
+// Ping interval is now handled in startMultiplayerMode()
+
+// --- Game Mode Functions ---
+window.startMultiplayerMode = function() {
+    gameMode = 'multiplayer';
+    document.getElementById('gameModeMenu').style.display = 'none';
+    document.getElementById('gameCanvas').style.display = 'block';
+    document.getElementById('controls').style.display = 'flex';
+    
+    // Initialize socket connection for multiplayer
+    if (typeof io !== 'undefined') {
+        socket = io({
+            transports: ['websocket'],
+            forceNew: true,
+            timeout: 5000,
+            reconnection: true,
+            reconnectionDelay: 100,
+            reconnectionAttempts: 5
+        });
+        
+        socket.on('playerColor', (color) => {
+            myColor = color;
+            console.log('Assigned color:', color);
+        });
+        socket.on('hostId', (id) => {
+            hostId = id;
+            isHost = (socket.id === hostId);
+            console.log('Received hostId:', hostId, 'Am I host?', isHost);
+            maybeStartGame();
+        });
+        socket.on('playerCount', (count) => {
+            playerCount = count;
+            waitingForPlayer = (count < 2);
+            maybeStartGame();
+        });
+        socket.on('connect', () => {
+            mySocketId = socket.id;
+            console.log('Connected with socket id:', mySocketId);
+        });
+        socket.on('playerDisconnected', () => {
+            alert('A player disconnected. Reloading...');
+            location.reload();
+        });
+        socket.on('gameState', (state) => {
+            latestGameState = state;
+        });
+        socket.on('viewerInput', (payload) => {
+            if (!isHost) return;
+            const { color, input } = payload.data;
+            remoteInputs[color] = input;
+        });
+        socket.on('pong', (sentTime) => {
+            ping = Math.round(performance.now() - sentTime);
+        });
+        socket.on('playerInput', (data) => {
+            remoteInputs[data.color] = data.input;
+        });
+        socket.on('mousePosition', (data) => {
+            remoteMousePositions[data.color] = { x: data.x, y: data.y };
+        });
+        socket.on('viewerInput', (data) => {
+            if (data.data.color && data.data.x !== undefined && data.data.y !== undefined) {
+                remoteMousePositions[data.data.color] = { x: data.data.x, y: data.data.y };
+            }
+        });
+        
+        // Set up ping interval for multiplayer
+        setInterval(() => {
+            if (socket) {
+                lastPingSent = performance.now();
+                socket.emit('ping', lastPingSent);
+            }
+        }, 1000); // Ping every second
+    }
+}
+
+window.startAIMode = function() {
+    console.log('Starting AI mode...');
+    gameMode = 'ai';
+    document.getElementById('gameModeMenu').style.display = 'none';
+    document.getElementById('gameCanvas').style.display = 'block';
+    document.getElementById('controls').style.display = 'flex';
+    
+    // Set up AI mode variables
+    myColor = 'red'; // Player is always red in AI mode
+    isHost = true; // Player is always host in AI mode
+    playerCount = 2; // Simulate 2 players
+    waitingForPlayer = false; // Don't wait for other players in AI mode
+    
+    // Ensure no socket connection in AI mode
+    if (socket) {
+        console.log('Disconnecting socket for AI mode');
+        socket.disconnect();
+        socket = null;
+    }
+    
+    console.log('AI mode variables set:', { gameMode, myColor, isHost, playerCount, waitingForPlayer, socket: !!socket });
+    
+    // Initialize tanks for AI mode
+    initTanks();
+    
+    // Start the game loop immediately
+    window._gameStarted = true;
+    console.log('Starting game loop for AI mode');
+    gameLoop(performance.now());
+}
+
+// Enhanced AI update function
+function updateAI() {
+    if (!aiTank || gameMode !== 'ai') {
+        console.log('updateAI early return:', { aiTank: !!aiTank, gameMode });
+        return;
+    }
+    
+    const playerTank = tanks.find(t => t.color === '#e74c3c');
+    if (!playerTank) return;
+    
+    // Update AI state timer
+    aiStateTimer++;
+    aiPredictionTimer++;
+    aiCoverTimer++;
+    aiAdaptiveTimer++;
+    
+    // Adaptive difficulty adjustment
+    if (aiAdaptiveTimer >= aiAdaptiveInterval) {
+        adjustAIDifficulty();
+        aiAdaptiveTimer = 0;
+    }
+    
+    // Update player prediction
+    if (aiPredictionTimer >= aiPredictionInterval) {
+        updatePlayerPrediction(playerTank);
+        aiPredictionTimer = 0;
+    }
+    
+    // Find cover periodically
+    if (aiCoverTimer >= aiCoverInterval) {
+        findCoverPosition();
+        aiCoverTimer = 0;
+    }
+    
+    // State machine logic
+    updateAIState(playerTank);
+    
+    // Reset AI input
+    aiInput.up = false;
+    aiInput.down = false;
+    aiInput.left = false;
+    aiInput.right = false;
+    
+    // Execute state-specific behavior
+    executeAIState(playerTank);
+    
+    // Advanced aiming with prediction
+    advancedAiming(playerTank);
+    
+    // Smart shooting with pattern recognition
+    smartShooting(playerTank);
+    
+    // Advanced dodging
+    advancedDodging();
+    
+    // Power-up strategy
+    powerUpStrategy(playerTank);
+    
+    // Meteor avoidance
+    meteorAvoidance();
+    
+    // Mini-tank management
+    miniTankStrategy();
+}
+
+// AI State Management
+function updateAIState(playerTank) {
+    const aiHealthPercent = aiTank.health / aiTank.maxHealth;
+    const playerHealthPercent = playerTank.health / playerTank.maxHealth;
+    const distance = getDistance(aiTank, playerTank);
+    
+    // State transitions based on conditions
+    if (aiHealthPercent < aiHealthThreshold && aiState !== 'retreat') {
+        aiState = 'retreat';
+        aiStateTimer = 0;
+        console.log('AI switching to retreat mode - low health');
+    } else if (aiHealthPercent > aiAggressiveThreshold && playerHealthPercent < 0.5 && aiState !== 'aggressive') {
+        aiState = 'aggressive';
+        aiStateTimer = 0;
+        console.log('AI switching to aggressive mode - advantage');
+    } else if (aiStateTimer >= aiStateDuration) {
+        // Random state change
+        const states = ['hunt', 'defensive', 'aggressive'];
+        aiState = states[Math.floor(Math.random() * states.length)];
+        aiStateTimer = 0;
+        console.log('AI switching to', aiState, 'mode');
+    }
+}
+
+// Execute AI state behavior
+function executeAIState(playerTank) {
+    const distance = getDistance(aiTank, playerTank);
+    
+    switch (aiState) {
+        case 'hunt':
+            huntingBehavior(playerTank, distance);
+            break;
+        case 'retreat':
+            retreatBehavior(playerTank, distance);
+            break;
+        case 'aggressive':
+            aggressiveBehavior(playerTank, distance);
+            break;
+        case 'defensive':
+            defensiveBehavior(playerTank, distance);
+            break;
+        case 'powerup':
+            powerUpBehavior();
+            break;
+    }
+}
+
+// Hunting behavior - balanced approach
+function huntingBehavior(playerTank, distance) {
+    const targetDistance = aiTargetDistance * (0.8 + aiDifficulty * 0.4);
+    
+    if (distance < targetDistance - 30) {
+        // Too close, move away intelligently
+        const angle = Math.atan2(playerTank.y - aiTank.y, playerTank.x - aiTank.x);
+        const escapeAngle = angle + Math.PI + (Math.random() - 0.5) * Math.PI / 2;
+        moveInDirection(escapeAngle);
+    } else if (distance > targetDistance + 30) {
+        // Too far, move closer
+        const angle = Math.atan2(playerTank.y - aiTank.y, playerTank.x - aiTank.x);
+        moveInDirection(angle);
+    } else {
+        // Good distance, strafe intelligently
+        const strafeAngle = Math.atan2(playerTank.y - aiTank.y, playerTank.x - aiTank.x) + Math.PI / 2;
+        if (aiStrafeDirection > 0) {
+            moveInDirection(strafeAngle);
+        } else {
+            moveInDirection(strafeAngle + Math.PI);
+        }
+    }
+}
+
+// Retreat behavior - find cover and heal
+function retreatBehavior(playerTank, distance) {
+    if (aiCoverPosition) {
+        // Move to cover
+        const coverAngle = Math.atan2(aiCoverPosition.y - aiTank.y, aiCoverPosition.x - aiTank.x);
+        moveInDirection(coverAngle);
+    } else {
+        // Move away from player
+        const escapeAngle = Math.atan2(aiTank.y - playerTank.y, aiTank.x - playerTank.x);
+        moveInDirection(escapeAngle);
+    }
+    
+    // Heal if possible
+    if (aiTank.health < aiTank.maxHealth * 0.5) {
+        // Stay still to regenerate health
+        aiInput.up = false;
+        aiInput.down = false;
+        aiInput.left = false;
+        aiInput.right = false;
+    }
+}
+
+// Aggressive behavior - close combat
+function aggressiveBehavior(playerTank, distance) {
+    const closeDistance = aiTargetDistance * 0.6;
+    
+    if (distance > closeDistance) {
+        // Move closer aggressively
+        const angle = Math.atan2(playerTank.y - aiTank.y, playerTank.x - aiTank.x);
+        moveInDirection(angle);
+    } else {
+        // Circle around player
+        const circleAngle = Math.atan2(playerTank.y - aiTank.y, playerTank.x - aiTank.x) + Math.PI / 2;
+        moveInDirection(circleAngle);
+    }
+}
+
+// Defensive behavior - maintain distance and dodge
+function defensiveBehavior(playerTank, distance) {
+    const safeDistance = aiTargetDistance * 1.2;
+    
+    if (distance < safeDistance) {
+        // Move away to safe distance
+        const escapeAngle = Math.atan2(aiTank.y - playerTank.y, aiTank.x - playerTank.x);
+        moveInDirection(escapeAngle);
+    } else {
+        // Strafe defensively
+        const strafeAngle = Math.atan2(playerTank.y - aiTank.y, playerTank.x - aiTank.x) + Math.PI / 2;
+        moveInDirection(strafeAngle);
+    }
+}
+
+// Power-up behavior
+function powerUpBehavior() {
+    const nearestPowerUp = findNearestPowerUp();
+    if (nearestPowerUp) {
+        const angle = Math.atan2(nearestPowerUp.y - aiTank.y, nearestPowerUp.x - aiTank.x);
+        moveInDirection(angle);
+    }
+}
+
+// Advanced aiming with prediction
+function advancedAiming(playerTank) {
+    // Predict player movement
+    const predictedX = playerTank.x + (playerTank.x - aiLastKnownPlayerPos.x) * 2;
+    const predictedY = playerTank.y + (playerTank.y - aiLastKnownPlayerPos.y) * 2;
+    
+    // Calculate aim angle with prediction
+    const aimDx = predictedX - aiTank.x;
+    const aimDy = predictedY - aiTank.y;
+    aiTank.angle = Math.atan2(aimDy, aimDx);
+}
+
+// Smart shooting with pattern recognition
+function smartShooting(playerTank) {
+    aiReactionTimer++;
+    if (aiReactionTimer >= aiReactionDelay) {
+        const now = Date.now();
+        if (now - aiTank.lastShot > aiTank.shootCooldown) {
+            const distance = getDistance(aiTank, playerTank);
+            const accuracy = aiDifficulty * (1 - distance / 500); // More accurate when closer
+            
+            if (Math.random() < accuracy) {
+                aiTank.shoot();
+                aiReactionDelay = Math.random() * 200 + 50; // Faster reaction time
+                aiReactionTimer = 0;
+            }
+        }
+    }
+}
+
+// Advanced dodging with pattern recognition
+function advancedDodging() {
+    bullets.forEach(bullet => {
+        if (bullet.color !== aiTank.color) {
+            const bulletDx = bullet.x - aiTank.x;
+            const bulletDy = bullet.y - aiTank.y;
+            const bulletDistance = Math.sqrt(bulletDx * bulletDx + bulletDy * bulletDy);
+            
+            if (bulletDistance < 120) {
+                // Enhanced bullet prediction
+                const timeToImpact = bulletDistance / Math.sqrt(bullet.vx * bullet.vx + bullet.vy * bullet.vy);
+                const predictedX = bullet.x + bullet.vx * timeToImpact;
+                const predictedY = bullet.y + bullet.vy * timeToImpact;
+                const predictedDx = predictedX - aiTank.x;
+                const predictedDy = predictedY - aiTank.y;
+                const predictedDistance = Math.sqrt(predictedDx * predictedDx + predictedDy * predictedDy);
+                
+                if (predictedDistance < 40) {
+                    // Smart dodge - choose best direction
+                    const dodgeDirections = [
+                        { x: -bullet.vy, y: bullet.vx }, // Perpendicular
+                        { x: bullet.vx, y: bullet.vy },  // Away from bullet
+                        { x: -bullet.vx, y: -bullet.vy } // Opposite direction
+                    ];
+                    
+                    let bestDodge = dodgeDirections[0];
+                    let bestScore = -Infinity;
+                    
+                    dodgeDirections.forEach(dodge => {
+                        const dodgeLength = Math.sqrt(dodge.x * dodge.x + dodge.y * dodge.y);
+                        if (dodgeLength > 0) {
+                            const normalizedDodgeX = dodge.x / dodgeLength;
+                            const normalizedDodgeY = dodge.y / dodgeLength;
+                            
+                            // Check if dodge direction is safe
+                            const newX = aiTank.x + normalizedDodgeX * 50;
+                            const newY = aiTank.y + normalizedDodgeY * 50;
+                            
+                            if (newX > 50 && newX < canvas.width - 50 && 
+                                newY > 50 && newY < canvas.height - 50) {
+                                const score = Math.random() * aiDifficulty; // Random but weighted by difficulty
+                                if (score > bestScore) {
+                                    bestScore = score;
+                                    bestDodge = dodge;
+                                }
+                            }
+                        }
+                    });
+                    
+                    // Apply best dodge
+                    const dodgeLength = Math.sqrt(bestDodge.x * bestDodge.x + bestDodge.y * bestDodge.y);
+                    if (dodgeLength > 0) {
+                        const normalizedDodgeX = bestDodge.x / dodgeLength;
+                        const normalizedDodgeY = bestDodge.y / dodgeLength;
+                        
+                        if (normalizedDodgeX > 0) aiInput.right = true;
+                        else aiInput.left = true;
+                        if (normalizedDodgeY > 0) aiInput.down = true;
+                        else aiInput.up = true;
+                    }
+                }
+            }
+        }
     });
 }
 
-setInterval(() => {
-    if (socket) {
-        lastPingSent = performance.now();
-        socket.emit('ping', lastPingSent);
+// Power-up strategy
+function powerUpStrategy(playerTank) {
+    const nearestPowerUp = findNearestPowerUp();
+    if (nearestPowerUp) {
+        const powerUpDistance = getDistance(aiTank, nearestPowerUp);
+        const playerDistance = getDistance(aiTank, playerTank);
+        
+        // Only go for power-ups if it's safe or we're in powerup mode
+        if (aiState === 'powerup' || powerUpDistance < 150 || playerDistance > 200) {
+            const angle = Math.atan2(nearestPowerUp.y - aiTank.y, nearestPowerUp.x - aiTank.x);
+            moveInDirection(angle);
+        }
     }
-}, 1000); // Ping every second
+}
+
+// Meteor avoidance
+function meteorAvoidance() {
+    meteors.forEach(meteor => {
+        if (meteor.active) {
+            const meteorDistance = getDistance(aiTank, meteor);
+            if (meteorDistance < 100) {
+                const escapeAngle = Math.atan2(aiTank.y - meteor.y, aiTank.x - meteor.x);
+                moveInDirection(escapeAngle);
+            }
+        }
+    });
+}
+
+// Mini-tank strategy
+function miniTankStrategy() {
+    // AI doesn't control mini-tanks directly, but can use them strategically
+    // This could be expanded in the future
+}
+
+// Helper functions
+function getDistance(obj1, obj2) {
+    const dx = obj1.x - obj2.x;
+    const dy = obj1.y - obj2.y;
+    return Math.sqrt(dx * dx + dy * dy);
+}
+
+function moveInDirection(angle) {
+    const speed = aiTank.speedBoost > 0 ? 8 : 4;
+    aiTank.x += Math.cos(angle) * speed;
+    aiTank.y += Math.sin(angle) * speed;
+    
+    // Keep tank within bounds
+    aiTank.x = Math.max(50, Math.min(canvas.width - 50, aiTank.x));
+    aiTank.y = Math.max(50, Math.min(canvas.height - 50, aiTank.y));
+}
+
+function updatePlayerPrediction(playerTank) {
+    aiLastKnownPlayerPos.x = playerTank.x;
+    aiLastKnownPlayerPos.y = playerTank.y;
+}
+
+function findCoverPosition() {
+    // Find a position away from player and bullets
+    const playerTank = tanks.find(t => t.color === '#e74c3c');
+    if (!playerTank) return;
+    
+    const escapeAngle = Math.atan2(aiTank.y - playerTank.y, aiTank.x - playerTank.x);
+    aiCoverPosition = {
+        x: aiTank.x + Math.cos(escapeAngle) * 200,
+        y: aiTank.y + Math.sin(escapeAngle) * 200
+    };
+    
+    // Keep within bounds
+    aiCoverPosition.x = Math.max(50, Math.min(canvas.width - 50, aiCoverPosition.x));
+    aiCoverPosition.y = Math.max(50, Math.min(canvas.height - 50, aiCoverPosition.y));
+}
+
+function findNearestPowerUp() {
+    let nearest = null;
+    let minDistance = Infinity;
+    
+    powerUps.forEach(powerUp => {
+        const distance = getDistance(aiTank, powerUp);
+        if (distance < minDistance) {
+            minDistance = distance;
+            nearest = powerUp;
+        }
+    });
+    
+    return nearest;
+}
+
+function adjustAIDifficulty() {
+    const playerTank = tanks.find(t => t.color === '#e74c3c');
+    if (!playerTank) return;
+    
+    const aiHealthPercent = aiTank.health / aiTank.maxHealth;
+    const playerHealthPercent = playerTank.health / playerTank.maxHealth;
+    
+    // Adaptive difficulty based on performance
+    if (aiHealthPercent < 0.3 && playerHealthPercent > 0.7) {
+        // AI is losing badly, make it easier
+        aiDifficulty = Math.max(0.3, aiDifficulty - 0.1);
+    } else if (aiHealthPercent > 0.8 && playerHealthPercent < 0.3) {
+        // AI is winning easily, make it harder
+        aiDifficulty = Math.min(1.0, aiDifficulty + 0.1);
+    }
+    
+    console.log('AI difficulty adjusted to:', aiDifficulty);
+}
 
 function maybeStartGame() {
+    if (gameMode === 'ai') {
+        // AI mode is already started in startAIMode()
+        return;
+    }
+    
     if (playerCount === 2 && hostId && myColor) {
         if (!window._gameStarted) {
             window._gameStarted = true;
@@ -711,7 +1242,7 @@ function maybeStartGame() {
 // Only the host should handle 'press any key to continue' to reset/start next round
 if (typeof window !== 'undefined') {
     window.addEventListener('keydown', (e) => {
-        if (isHost && !gameRunning && gameOverMessage && playerCount === 2) {
+        if (isHost && !gameRunning && gameOverMessage && playerCount === 2 && (gameMode === 'multiplayer' || gameMode === 'ai')) {
             startCountdown();
             gameOverMessage = '';
         }
@@ -731,25 +1262,48 @@ const keyMap = {
 
 // Listen for keydown/keyup and update localInput
 window.addEventListener('keydown', (e) => {
-    if (!myColor) return;
-    const mapping = keyMap[myColor];
-    for (const action in mapping) {
-        if (e.key.toLowerCase() === mapping[action]) localInput[action] = true;
+    // Handle input for both multiplayer and AI modes
+    if (gameMode === 'multiplayer' && !myColor) return;
+    if (gameMode === 'ai') {
+        // In AI mode, player is always red
+        const mapping = keyMap.red;
+        for (const action in mapping) {
+            if (e.key.toLowerCase() === mapping[action]) {
+                localInput[action] = true;
+                console.log('AI mode keydown:', e.key, action, localInput);
+            }
+        }
+    } else if (myColor) {
+        // Multiplayer mode
+        const mapping = keyMap[myColor];
+        for (const action in mapping) {
+            if (e.key.toLowerCase() === mapping[action]) localInput[action] = true;
+        }
+        sendInput(); // Send input immediately on keydown
     }
-    sendInput(); // Send input immediately on keydown
 });
 window.addEventListener('keyup', (e) => {
-    if (!myColor) return;
-    const mapping = keyMap[myColor];
-    for (const action in mapping) {
-        if (e.key.toLowerCase() === mapping[action]) localInput[action] = false;
+    // Handle input for both multiplayer and AI modes
+    if (gameMode === 'multiplayer' && !myColor) return;
+    if (gameMode === 'ai') {
+        // In AI mode, player is always red
+        const mapping = keyMap.red;
+        for (const action in mapping) {
+            if (e.key.toLowerCase() === mapping[action]) localInput[action] = false;
+        }
+    } else if (myColor) {
+        // Multiplayer mode
+        const mapping = keyMap[myColor];
+        for (const action in mapping) {
+            if (e.key.toLowerCase() === mapping[action]) localInput[action] = false;
+        }
+        sendInput(); // Send input immediately on keyup
     }
-    sendInput(); // Send input immediately on keyup
 });
 
 // Send local input to server (with color)
 function sendInput() {
-    if (socket && myColor) {
+    if (socket && myColor && gameMode === 'multiplayer') {
         if (isHost) return; // Host does not send input to itself
         socket.emit('playerInput', { color: myColor, input: { ...localInput } });
     }
@@ -757,16 +1311,27 @@ function sendInput() {
 
 // Send mouse position to server
 function sendMousePosition() {
-    if (socket && myColor) {
+    if (socket && myColor && gameMode === 'multiplayer') {
         // Both host and viewers send their mouse position
         socket.emit('mousePosition', { color: myColor, x: mouseX, y: mouseY });
     }
 }
-setInterval(sendInput, 1000/240); // 240 times per second (4ms intervals)
-setInterval(sendMousePosition, 1000/200); // 200 times per second (5ms intervals)
+// Only set up intervals for multiplayer mode
+if (typeof io !== 'undefined') {
+    setInterval(() => {
+        if (gameMode === 'multiplayer') {
+            sendInput();
+        }
+    }, 1000/240); // 240 times per second (4ms intervals)
+    setInterval(() => {
+        if (gameMode === 'multiplayer') {
+            sendMousePosition();
+        }
+    }, 1000/200); // 200 times per second (5ms intervals)
+}
 
-// Receive remote input from server (by color)
-if (socket) {
+// Receive remote input from server (by color) - only in multiplayer mode
+if (socket && gameMode === 'multiplayer') {
     socket.on('playerInput', (data) => {
         remoteInputs[data.color] = data.input;
     });
@@ -786,34 +1351,71 @@ if (socket) {
 
 // Patch initTanks to use multiplayer controls
 function getMultiplayerControls(color) {
-    if (color === myColor) {
-        // Local player controls
-        return {
-            up:   () => localInput.up,
-            down: () => localInput.down,
-            left: () => localInput.left,
-            right: () => localInput.right
-        };
+    if (gameMode === 'ai') {
+        if (color === 'red' || color === '#e74c3c') {
+            // Player tank (red) - use local input
+            return {
+                up:   () => localInput.up,
+                down: () => localInput.down,
+                left: () => localInput.left,
+                right: () => localInput.right
+            };
+        } else if (color === 'blue' || color === '#3498db') {
+            // AI tank (blue) - use AI input
+            return {
+                up:   () => aiInput.up,
+                down: () => aiInput.down,
+                left: () => aiInput.left,
+                right: () => aiInput.right
+            };
+        }
     } else {
-        // Remote player controls
-        return {
-            up:   () => remoteInputs[color]?.up,
-            down: () => remoteInputs[color]?.down,
-            left: () => remoteInputs[color]?.left,
-            right: () => remoteInputs[color]?.right
-        };
+        // Multiplayer mode
+        if (color === myColor) {
+            // Local player controls
+            return {
+                up:   () => localInput.up,
+                down: () => localInput.down,
+                left: () => localInput.left,
+                right: () => localInput.right
+            };
+        } else {
+            // Remote player controls
+            return {
+                up:   () => remoteInputs[color]?.up,
+                down: () => remoteInputs[color]?.down,
+                left: () => remoteInputs[color]?.left,
+                right: () => remoteInputs[color]?.right
+            };
+        }
     }
 }
 
 // Override initTanks for multiplayer
 function initTanks() {
     console.log('initTanks called');
+    const redControls = getMultiplayerControls('red');
+    const blueControls = getMultiplayerControls('blue');
+    console.log('Controls assigned:', { 
+        red: redControls, 
+        blue: blueControls, 
+        gameMode, 
+        localInput, 
+        aiInput 
+    });
+    
     tanks = [
-        new Tank(canvas.width * 0.25, canvas.height * 0.5, '#e74c3c', getMultiplayerControls('red')),
-        new Tank(canvas.width * 0.75, canvas.height * 0.5, '#3498db', getMultiplayerControls('blue'))
+        new Tank(canvas.width * 0.25, canvas.height * 0.5, '#e74c3c', redControls),
+        new Tank(canvas.width * 0.75, canvas.height * 0.5, '#3498db', blueControls)
     ];
     tanks[0].angle = Math.PI;
     tanks[1].angle = 0;
+    
+    // Set AI tank reference for AI mode
+    if (gameMode === 'ai') {
+        aiTank = tanks[1]; // Blue tank is AI
+        console.log('AI tank set:', aiTank);
+    }
 }
 
 // Serialize game state for sending to viewers (optimized for low latency)
@@ -928,6 +1530,12 @@ function applyGameState(state) {
 // Update game state
 function update() {
     if (!isHost) return; // Only host runs game logic
+    
+    // Update AI in AI mode
+    if (gameMode === 'ai') {
+        console.log('Calling updateAI from update function');
+        updateAI();
+    }
     // Spawn power-ups randomly
     if (Math.random() < 0.015 && powerUps.length < 5) { // 1.5% chance per frame, max 5 power-ups
         const types = ['speed', 'rapid', 'shield', 'multishot', 'minitank'];
@@ -1304,8 +1912,8 @@ function draw() {
     // Draw laser hazards
     laserHazards.forEach(h => h.draw());
 
-    // Show waiting overlay if not enough players
-    if (waitingForPlayer) {
+    // Show waiting overlay if not enough players (only in multiplayer mode)
+    if (waitingForPlayer && gameMode === 'multiplayer') {
         ctx.save();
         ctx.fillStyle = 'rgba(0,0,0,0.7)';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -1323,6 +1931,84 @@ function draw() {
     ctx.textAlign = 'left';
     ctx.fillText(`Ping: ${ping} ms`, 16, 28);
     ctx.restore();
+
+    // Draw AI state indicators (only in AI mode)
+    if (gameMode === 'ai' && aiTank) {
+        ctx.save();
+        ctx.font = '14px Arial';
+        ctx.fillStyle = '#3498db';
+        ctx.textAlign = 'left';
+        
+        // AI State
+        const stateColors = {
+            'hunt': '#3498db',
+            'retreat': '#e74c3c',
+            'aggressive': '#f39c12',
+            'defensive': '#27ae60',
+            'powerup': '#9b59b6'
+        };
+        
+        const stateColor = stateColors[aiState] || '#3498db';
+        ctx.fillStyle = stateColor;
+        ctx.fillText(`AI State: ${aiState.toUpperCase()}`, 16, 50);
+        
+        // AI Difficulty
+        const difficultyColor = aiDifficulty > 0.7 ? '#e74c3c' : aiDifficulty > 0.4 ? '#f39c12' : '#27ae60';
+        ctx.fillStyle = difficultyColor;
+        ctx.fillText(`AI Difficulty: ${Math.round(aiDifficulty * 100)}%`, 16, 70);
+        
+        // AI Health
+        const healthPercent = Math.round((aiTank.health / aiTank.maxHealth) * 100);
+        const healthColor = healthPercent > 70 ? '#27ae60' : healthPercent > 30 ? '#f39c12' : '#e74c3c';
+        ctx.fillStyle = healthColor;
+        ctx.fillText(`AI Health: ${healthPercent}%`, 16, 90);
+        
+        // Draw AI cover position (if in retreat mode)
+        if (aiState === 'retreat' && aiCoverPosition) {
+            ctx.save();
+            ctx.strokeStyle = '#e74c3c';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([5, 5]);
+            ctx.beginPath();
+            ctx.moveTo(aiTank.x, aiTank.y);
+            ctx.lineTo(aiCoverPosition.x, aiCoverPosition.y);
+            ctx.stroke();
+            
+            // Draw cover marker
+            ctx.fillStyle = '#e74c3c';
+            ctx.beginPath();
+            ctx.arc(aiCoverPosition.x, aiCoverPosition.y, 8, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        }
+        
+        // Draw AI prediction line (if difficulty is high)
+        if (aiDifficulty > 0.6) {
+            const playerTank = tanks.find(t => t.color === '#e74c3c');
+            if (playerTank) {
+                const predictedX = playerTank.x + (playerTank.x - aiLastKnownPlayerPos.x) * 2;
+                const predictedY = playerTank.y + (playerTank.y - aiLastKnownPlayerPos.y) * 2;
+                
+                ctx.save();
+                ctx.strokeStyle = '#f39c12';
+                ctx.lineWidth = 1;
+                ctx.setLineDash([3, 3]);
+                ctx.beginPath();
+                ctx.moveTo(playerTank.x, playerTank.y);
+                ctx.lineTo(predictedX, predictedY);
+                ctx.stroke();
+                
+                // Draw prediction marker
+                ctx.fillStyle = '#f39c12';
+                ctx.beginPath();
+                ctx.arc(predictedX, predictedY, 4, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+        }
+        
+        ctx.restore();
+    }
 
     if (!isHost) {
         // Adaptive interpolation based on ping for smoother movement
@@ -1344,7 +2030,6 @@ function draw() {
 
 // Game loop runs at 60fps via requestAnimationFrame
 // 60fps game loop with consistent frame rate
-let lastFrameTime = 0;
 const targetFrameTime = 1000 / 60; // 16.67ms for 60fps
 
 function gameLoop(currentTime) {
@@ -1353,7 +2038,8 @@ function gameLoop(currentTime) {
     // Calculate delta time for smooth 60fps
     const deltaTime = currentTime - lastFrameTime;
     
-    if (isHost) {
+    if (isHost || gameMode === 'ai') {
+        // Host mode or AI mode - run game logic
         if (gameRunning) {
             update();
         } else if (countdownActive) {
@@ -1363,6 +2049,7 @@ function gameLoop(currentTime) {
         lastFrameTime = currentTime;
         requestAnimationFrame(gameLoop);
     } else {
+        // Multiplayer viewer mode
         // Always update at 60fps regardless of network conditions
         applyGameState(latestGameState);
 
