@@ -1154,7 +1154,7 @@ function getDistance(obj1, obj2) {
 }
 
 function moveInDirection(angle) {
-    const speed = aiTank.speedBoost > 0 ? 8 : 4;
+    const speed = aiTank.speedBoost > 0 ? 6 : 3; // Same as player speed
     aiTank.x += Math.cos(angle) * speed;
     aiTank.y += Math.sin(angle) * speed;
     
