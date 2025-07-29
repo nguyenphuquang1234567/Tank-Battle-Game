@@ -683,6 +683,8 @@ let aiStrafeTimer = 0;
 let aiStrafeInterval = 120; // Change direction every 2 seconds
 let aiReactionDelay = 0; // Random delay for shooting
 let aiReactionTimer = 0;
+let aiMovementSmoothing = 0.8; // Smoothing factor for movement changes
+let aiLastMovementDirection = { x: 0, y: 0 }; // Track last movement direction
 
 // Enhanced AI variables
 let aiState = 'hunt'; // hunt, retreat, aggressive, defensive, powerup
@@ -865,6 +867,18 @@ function updateAI() {
     // Execute state-specific behavior
     executeAIState(playerTank);
     
+    // Ensure AI input is properly set for smooth movement
+    // This ensures the tank moves smoothly like a player would
+    
+    // Add some randomness to prevent predictable movement
+    if (Math.random() < 0.02) { // 2% chance per frame
+        // Briefly pause movement
+        aiInput.up = false;
+        aiInput.down = false;
+        aiInput.left = false;
+        aiInput.right = false;
+    }
+    
     // Advanced aiming with prediction
     advancedAiming(playerTank);
     
@@ -874,11 +888,13 @@ function updateAI() {
     // Advanced dodging
     advancedDodging();
     
-    // Power-up strategy
-    powerUpStrategy(playerTank);
+    // Power-up strategy (check first, as it can override other movement)
+    const goingForPowerUp = powerUpStrategy(playerTank);
     
-    // Meteor avoidance
-    meteorAvoidance();
+    // Meteor avoidance (only if not going for power-up)
+    if (!goingForPowerUp) {
+        meteorAvoidance();
+    }
     
     // Mini-tank management
     miniTankStrategy();
@@ -890,6 +906,21 @@ function updateAIState(playerTank) {
     const playerHealthPercent = playerTank.health / playerTank.maxHealth;
     const distance = getDistance(aiTank, playerTank);
     
+    // Check for power-ups first
+    const nearestPowerUp = findNearestPowerUp();
+    if (nearestPowerUp) {
+        const powerUpDistance = getDistance(aiTank, nearestPowerUp);
+        const playerDistance = getDistance(aiTank, playerTank);
+        
+        // Switch to powerup mode if there's a valuable power-up nearby and it's safe
+        if (powerUpDistance < 200 && playerDistance > 180 && aiState !== 'powerup') {
+            aiState = 'powerup';
+            aiStateTimer = 0;
+            console.log('AI switching to powerup mode - valuable power-up nearby');
+            return;
+        }
+    }
+    
     // State transitions based on conditions
     if (aiHealthPercent < aiHealthThreshold && aiState !== 'retreat') {
         aiState = 'retreat';
@@ -900,8 +931,8 @@ function updateAIState(playerTank) {
         aiStateTimer = 0;
         console.log('AI switching to aggressive mode - advantage');
     } else if (aiStateTimer >= aiStateDuration) {
-        // Random state change
-        const states = ['hunt', 'defensive', 'aggressive'];
+        // Random state change (include powerup in possible states)
+        const states = ['hunt', 'defensive', 'aggressive', 'powerup'];
         aiState = states[Math.floor(Math.random() * states.length)];
         aiStateTimer = 0;
         console.log('AI switching to', aiState, 'mode');
@@ -945,13 +976,29 @@ function huntingBehavior(playerTank, distance) {
         const angle = Math.atan2(playerTank.y - aiTank.y, playerTank.x - aiTank.x);
         moveInDirection(angle);
     } else {
-        // Good distance, strafe intelligently
-        const strafeAngle = Math.atan2(playerTank.y - aiTank.y, playerTank.x - aiTank.x) + Math.PI / 2;
-        if (aiStrafeDirection > 0) {
-            moveInDirection(strafeAngle);
+        // Good distance, strafe intelligently or stay still
+        if (Math.random() < 0.3) { // 30% chance to stay still
+            // Stay still for better accuracy
+            aiInput.up = false;
+            aiInput.down = false;
+            aiInput.left = false;
+            aiInput.right = false;
         } else {
-            moveInDirection(strafeAngle + Math.PI);
+            // Strafe intelligently
+            const strafeAngle = Math.atan2(playerTank.y - aiTank.y, playerTank.x - aiTank.x) + Math.PI / 2;
+            if (aiStrafeDirection > 0) {
+                moveInDirection(strafeAngle);
+            } else {
+                moveInDirection(strafeAngle + Math.PI);
+            }
         }
+    }
+    
+    // Update strafe direction periodically
+    aiStrafeTimer++;
+    if (aiStrafeTimer >= aiStrafeInterval) {
+        aiStrafeDirection *= -1;
+        aiStrafeTimer = 0;
     }
 }
 
@@ -1011,8 +1058,47 @@ function defensiveBehavior(playerTank, distance) {
 function powerUpBehavior() {
     const nearestPowerUp = findNearestPowerUp();
     if (nearestPowerUp) {
-        const angle = Math.atan2(nearestPowerUp.y - aiTank.y, nearestPowerUp.x - aiTank.x);
-        moveInDirection(angle);
+        const powerUpDistance = getDistance(aiTank, nearestPowerUp);
+        const playerTank = tanks.find(t => t.color === '#e74c3c');
+        const playerDistance = getDistance(aiTank, playerTank);
+        
+        // Prioritize power-ups based on type and situation
+        let priority = 0;
+        
+        // High priority for shield when low health
+        if (nearestPowerUp.type === 'shield' && aiTank.health < aiTank.maxHealth * 0.5) {
+            priority = 100;
+        }
+        // High priority for speed when being chased
+        else if (nearestPowerUp.type === 'speed' && playerDistance < 150) {
+            priority = 90;
+        }
+        // High priority for rapid fire when in combat
+        else if (nearestPowerUp.type === 'rapid' && playerDistance < 200) {
+            priority = 80;
+        }
+        // Medium priority for multishot
+        else if (nearestPowerUp.type === 'multishot') {
+            priority = 70;
+        }
+        // Lower priority for other types
+        else {
+            priority = 50;
+        }
+        
+        // Only go for power-up if it's worth it and safe
+        if (priority > 60 || (powerUpDistance < 120 && playerDistance > 150)) {
+            const angle = Math.atan2(nearestPowerUp.y - aiTank.y, nearestPowerUp.x - aiTank.x);
+            moveInDirection(angle);
+        } else {
+            // If power-up is not worth it, switch to another state
+            aiState = 'hunt';
+            aiStateTimer = 0;
+        }
+    } else {
+        // No power-ups available, switch to hunt mode
+        aiState = 'hunt';
+        aiStateTimer = 0;
     }
 }
 
@@ -1095,16 +1181,17 @@ function advancedDodging() {
                         }
                     });
                     
-                    // Apply best dodge
+                    // Apply best dodge using input system
                     const dodgeLength = Math.sqrt(bestDodge.x * bestDodge.x + bestDodge.y * bestDodge.y);
                     if (dodgeLength > 0) {
                         const normalizedDodgeX = bestDodge.x / dodgeLength;
                         const normalizedDodgeY = bestDodge.y / dodgeLength;
                         
-                        if (normalizedDodgeX > 0) aiInput.right = true;
-                        else aiInput.left = true;
-                        if (normalizedDodgeY > 0) aiInput.down = true;
-                        else aiInput.up = true;
+                        // Set input based on dodge direction
+                        if (normalizedDodgeX > 0.3) aiInput.right = true;
+                        else if (normalizedDodgeX < -0.3) aiInput.left = true;
+                        if (normalizedDodgeY > 0.3) aiInput.down = true;
+                        else if (normalizedDodgeY < -0.3) aiInput.up = true;
                     }
                 }
             }
@@ -1119,12 +1206,59 @@ function powerUpStrategy(playerTank) {
         const powerUpDistance = getDistance(aiTank, nearestPowerUp);
         const playerDistance = getDistance(aiTank, playerTank);
         
-        // Only go for power-ups if it's safe or we're in powerup mode
-        if (aiState === 'powerup' || powerUpDistance < 150 || playerDistance > 200) {
-            const angle = Math.atan2(nearestPowerUp.y - aiTank.y, nearestPowerUp.x - aiTank.x);
-            moveInDirection(angle);
+            // Enhanced power-up logic
+    let shouldGetPowerUp = false;
+    
+    // Always get power-ups if very close
+    if (powerUpDistance < 80) {
+        shouldGetPowerUp = true;
+    }
+    // Get power-ups if player is far away and it's safe
+    else if (playerDistance > 250) {
+        shouldGetPowerUp = true;
+    }
+    // Get power-ups if AI is low on health and it's a shield or health-related
+    else if (aiTank.health < aiTank.maxHealth * 0.4 && 
+            (nearestPowerUp.type === 'shield' || nearestPowerUp.type === 'speed')) {
+        shouldGetPowerUp = true;
+    }
+    // Get power-ups if AI is in powerup mode
+    else if (aiState === 'powerup') {
+        shouldGetPowerUp = true;
+    }
+    // Get power-ups if it's a valuable type and relatively safe
+    else if (powerUpDistance < 200 && playerDistance > 150 && 
+            (nearestPowerUp.type === 'rapid' || nearestPowerUp.type === 'multishot')) {
+        shouldGetPowerUp = true;
+    }
+    // Get power-ups if AI is being chased and needs speed
+    else if (playerDistance < 120 && nearestPowerUp.type === 'speed') {
+        shouldGetPowerUp = true;
+    }
+    // Get power-ups if AI is in combat and needs rapid fire
+    else if (playerDistance < 180 && nearestPowerUp.type === 'rapid') {
+        shouldGetPowerUp = true;
+    }
+        
+        if (shouldGetPowerUp) {
+            // Check if it's safe to go for the power-up
+            const bulletsNearby = bullets.filter(bullet => {
+                if (bullet.color === aiTank.color) return false; // Ignore own bullets
+                const bulletDistance = getDistance(aiTank, bullet);
+                return bulletDistance < 100;
+            });
+            
+            // Don't go for power-up if there are too many bullets nearby
+            if (bulletsNearby.length < 3) {
+                const angle = Math.atan2(nearestPowerUp.y - aiTank.y, nearestPowerUp.x - aiTank.x);
+                moveInDirection(angle);
+                
+                // Override other movement when going for power-ups
+                return true; // Indicate that we're going for a power-up
+            }
         }
     }
+    return false;
 }
 
 // Meteor avoidance
@@ -1135,6 +1269,9 @@ function meteorAvoidance() {
             if (meteorDistance < 100) {
                 const escapeAngle = Math.atan2(aiTank.y - meteor.y, aiTank.x - meteor.x);
                 moveInDirection(escapeAngle);
+                
+                // Override other movement when avoiding meteors
+                return; // Exit early to prioritize meteor avoidance
             }
         }
     });
@@ -1154,13 +1291,36 @@ function getDistance(obj1, obj2) {
 }
 
 function moveInDirection(angle) {
+    // Convert angle to input directions for smooth movement
     const speed = aiTank.speedBoost > 0 ? 6 : 3; // Same as player speed
-    aiTank.x += Math.cos(angle) * speed;
-    aiTank.y += Math.sin(angle) * speed;
     
-    // Keep tank within bounds
-    aiTank.x = Math.max(50, Math.min(canvas.width - 50, aiTank.x));
-    aiTank.y = Math.max(50, Math.min(canvas.height - 50, aiTank.y));
+    // Calculate movement based on angle
+    const dx = Math.cos(angle);
+    const dy = Math.sin(angle);
+    
+    // Smooth movement direction changes
+    aiLastMovementDirection.x = aiLastMovementDirection.x * aiMovementSmoothing + dx * (1 - aiMovementSmoothing);
+    aiLastMovementDirection.y = aiLastMovementDirection.y * aiMovementSmoothing + dy * (1 - aiMovementSmoothing);
+    
+    // Set AI input based on smoothed direction
+    aiInput.up = aiLastMovementDirection.y < -0.3;
+    aiInput.down = aiLastMovementDirection.y > 0.3;
+    aiInput.left = aiLastMovementDirection.x < -0.3;
+    aiInput.right = aiLastMovementDirection.x > 0.3;
+    
+    // Ensure tank stays within bounds by checking future position
+    const futureX = aiTank.x + aiLastMovementDirection.x * speed;
+    const futureY = aiTank.y + aiLastMovementDirection.y * speed;
+    
+    // Prevent movement if it would go out of bounds
+    if (futureX < 50 || futureX > canvas.width - 50) {
+        aiInput.left = false;
+        aiInput.right = false;
+    }
+    if (futureY < 50 || futureY > canvas.height - 50) {
+        aiInput.up = false;
+        aiInput.down = false;
+    }
 }
 
 function updatePlayerPrediction(playerTank) {
