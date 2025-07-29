@@ -686,7 +686,7 @@ let aiTargetDistance = 150; // Preferred distance from player
 let aiStrafeDirection = 1; // 1 for right, -1 for left
 let aiStrafeTimer = 0;
 let aiStrafeInterval = 120; // Change direction every 2 seconds
-let aiReactionDelay = 0; // Random delay for shooting
+let aiReactionDelay = 30; // Random delay for shooting (increased from 0)
 let aiReactionTimer = 0;
 let aiMovementSmoothing = 0.8; // Smoothing factor for movement changes
 let aiLastMovementDirection = { x: 0, y: 0 }; // Track last movement direction
@@ -694,14 +694,14 @@ let aiLastMovementDirection = { x: 0, y: 0 }; // Track last movement direction
 // Enhanced AI variables
 let aiState = 'hunt'; // hunt, retreat, aggressive, defensive, powerup
 let aiStateTimer = 0;
-let aiStateDuration = 180; // 3 seconds at 60fps
+let aiStateDuration = 300; // 5 seconds at 60fps (increased from 180)
 let aiHealthThreshold = 0.3; // Switch to defensive when health < 30%
 let aiAggressiveThreshold = 0.7; // Switch to aggressive when health > 70%
 let aiLastKnownPlayerPos = { x: 0, y: 0 };
 let aiPredictionTimer = 0;
-let aiPredictionInterval = 30; // Update player prediction every 0.5 seconds
+let aiPredictionInterval = 60; // Update player prediction every 1 second (increased from 30)
 let aiCoverTimer = 0;
-let aiCoverInterval = 120; // Find cover every 2 seconds
+let aiCoverInterval = 240; // Find cover every 4 seconds (increased from 120)
 let aiCoverPosition = null;
 let aiBulletMemory = []; // Remember recent bullet patterns
 let aiPatternRecognition = {
@@ -709,9 +709,9 @@ let aiPatternRecognition = {
     playerShootPattern: [],
     playerMovementPattern: []
 };
-let aiDifficulty = 0.8; // 0.0 = easy, 1.0 = hard
+let aiDifficulty = 0.5; // 0.0 = easy, 1.0 = hard (reduced from 0.8)
 let aiAdaptiveTimer = 0;
-let aiAdaptiveInterval = 600; // Adapt difficulty every 10 seconds
+let aiAdaptiveInterval = 1200; // Adapt difficulty every 20 seconds (increased from 600)
 
 // --- Ping Indicator ---
 let ping = 0;
@@ -881,7 +881,7 @@ function updateAI() {
     // This ensures the tank moves smoothly like a player would
     
     // Add some randomness to prevent predictable movement
-    if (Math.random() < 0.02) { // 2% chance per frame
+    if (Math.random() < 0.05) { // 5% chance per frame (increased from 2%)
         // Briefly pause movement
         aiInput.up = false;
         aiInput.down = false;
@@ -931,12 +931,12 @@ function updateAIState(playerTank) {
         }
     }
     
-    // State transitions based on conditions
-    if (aiHealthPercent < aiHealthThreshold && aiState !== 'retreat') {
+    // State transitions based on conditions (with additional delay)
+    if (aiHealthPercent < aiHealthThreshold && aiState !== 'retreat' && aiStateTimer > 60) {
         aiState = 'retreat';
         aiStateTimer = 0;
         console.log('AI switching to retreat mode - low health');
-    } else if (aiHealthPercent > aiAggressiveThreshold && playerHealthPercent < 0.5 && aiState !== 'aggressive') {
+    } else if (aiHealthPercent > aiAggressiveThreshold && playerHealthPercent < 0.5 && aiState !== 'aggressive' && aiStateTimer > 60) {
         aiState = 'aggressive';
         aiStateTimer = 0;
         console.log('AI switching to aggressive mode - advantage');
@@ -1131,11 +1131,11 @@ function smartShooting(playerTank) {
         const now = Date.now();
         if (now - aiTank.lastShot > aiTank.shootCooldown) {
             const distance = getDistance(aiTank, playerTank);
-            const accuracy = aiDifficulty * (1 - distance / 500); // More accurate when closer
+            const accuracy = aiDifficulty * 0.6 * (1 - distance / 500); // Reduced accuracy (0.6 multiplier)
             
             if (Math.random() < accuracy) {
                 aiTank.shoot();
-                aiReactionDelay = Math.random() * 200 + 50; // Faster reaction time
+                aiReactionDelay = Math.random() * 300 + 100; // Slower reaction time (increased from 200+50)
                 aiReactionTimer = 0;
             }
         }
