@@ -2,6 +2,9 @@
 const bgImage = new Image();
 bgImage.src = 'assets/background.png';
 
+// TensorFlow AI will be loaded dynamically
+let TensorFlowAI = null;
+
 // Game canvas and context
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
@@ -676,6 +679,10 @@ let aiInput = {
     up: false, down: false, left: false, right: false
 };
 
+// TensorFlow AI
+let tensorFlowAI = null;
+let useTensorFlowAI = false; // Toggle between old AI and TensorFlow AI
+
 // AI behavior variables
 let aiTargetDistance = 150; // Preferred distance from player
 let aiStrafeDirection = 1; // 1 for right, -1 for left
@@ -812,6 +819,9 @@ window.startAIMode = function() {
     
     console.log('AI mode variables set:', { gameMode, myColor, isHost, playerCount, waitingForPlayer, socket: !!socket });
     
+    // Initialize TensorFlow AI
+    initTensorFlowAI();
+    
     // Initialize tanks for AI mode
     initTanks();
     
@@ -821,8 +831,47 @@ window.startAIMode = function() {
     gameLoop(performance.now());
 }
 
+// Initialize TensorFlow AI
+async function initTensorFlowAI() {
+    try {
+        // Load TensorFlow.js from CDN
+        const script = document.createElement('script');
+        script.src = 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.15.0/dist/tf.min.js';
+        document.head.appendChild(script);
+        
+        // Wait for TensorFlow.js to load
+        await new Promise((resolve) => {
+            script.onload = resolve;
+        });
+        
+        // Load AI class
+        const aiScript = document.createElement('script');
+        aiScript.src = 'ai-tensorflow.js';
+        document.head.appendChild(aiScript);
+        
+        // Wait for AI class to load
+        await new Promise((resolve) => {
+            aiScript.onload = resolve;
+        });
+        
+        // Get TensorFlowAI class from window
+        TensorFlowAI = window.TensorFlowAI;
+        
+        if (TensorFlowAI) {
+            tensorFlowAI = new TensorFlowAI();
+            console.log('TensorFlow AI initialized');
+        } else {
+            throw new Error('TensorFlowAI class not found');
+        }
+        
+    } catch (error) {
+        console.error('Error initializing TensorFlow AI:', error);
+        useTensorFlowAI = false;
+    }
+}
+
 // Enhanced AI update function
-function updateAI() {
+async function updateAI() {
     if (!aiTank || gameMode !== 'ai') {
         console.log('updateAI early return:', { aiTank: !!aiTank, gameMode });
         return;
@@ -831,6 +880,39 @@ function updateAI() {
     const playerTank = tanks.find(t => t.color === '#e74c3c');
     if (!playerTank) return;
     
+    // Use TensorFlow AI if available and enabled
+    if (useTensorFlowAI && tensorFlowAI) {
+        try {
+            const gameState = {
+                aiTank: aiTank,
+                playerTank: playerTank,
+                bullets: bullets,
+                powerUps: powerUps,
+                meteors: meteors
+            };
+            
+            const decision = await tensorFlowAI.getDecision(gameState);
+            
+            // Apply TensorFlow AI decision
+            aiInput.up = decision.up;
+            aiInput.down = decision.down;
+            aiInput.left = decision.left;
+            aiInput.right = decision.right;
+            
+            // Handle shooting
+            if (decision.shoot) {
+                aiTank.shoot();
+            }
+            
+            return;
+            
+        } catch (error) {
+            console.error('TensorFlow AI error, falling back to rule-based AI:', error);
+            useTensorFlowAI = false;
+        }
+    }
+    
+    // Fallback to original rule-based AI
     // Update AI state timer
     aiStateTimer++;
     aiPredictionTimer++;
@@ -1422,6 +1504,13 @@ const keyMap = {
 
 // Listen for keydown/keyup and update localInput
 window.addEventListener('keydown', (e) => {
+    // Handle AI type toggle
+    if (gameMode === 'ai' && e.key === 't') {
+        useTensorFlowAI = !useTensorFlowAI;
+        console.log('Switched to:', useTensorFlowAI ? 'TensorFlow AI' : 'Rule-based AI');
+        return;
+    }
+    
     // Handle input for both multiplayer and AI modes
     if (gameMode === 'multiplayer' && !myColor) return;
     if (gameMode === 'ai') {
@@ -2099,23 +2188,31 @@ function draw() {
         ctx.fillStyle = '#3498db';
         ctx.textAlign = 'left';
         
-        // AI State
-        const stateColors = {
-            'hunt': '#3498db',
-            'retreat': '#e74c3c',
-            'aggressive': '#f39c12',
-            'defensive': '#27ae60',
-            'powerup': '#9b59b6'
-        };
+        // AI Type
+        const aiType = useTensorFlowAI ? 'TensorFlow AI' : 'Rule-based AI';
+        const aiTypeColor = useTensorFlowAI ? '#9b59b6' : '#3498db';
+        ctx.fillStyle = aiTypeColor;
+        ctx.fillText(`AI Type: ${aiType}`, 16, 30);
         
-        const stateColor = stateColors[aiState] || '#3498db';
-        ctx.fillStyle = stateColor;
-        ctx.fillText(`AI State: ${aiState.toUpperCase()}`, 16, 50);
-        
-        // AI Difficulty
-        const difficultyColor = aiDifficulty > 0.7 ? '#e74c3c' : aiDifficulty > 0.4 ? '#f39c12' : '#27ae60';
-        ctx.fillStyle = difficultyColor;
-        ctx.fillText(`AI Difficulty: ${Math.round(aiDifficulty * 100)}%`, 16, 70);
+        // AI State (only for rule-based AI)
+        if (!useTensorFlowAI) {
+            const stateColors = {
+                'hunt': '#3498db',
+                'retreat': '#e74c3c',
+                'aggressive': '#f39c12',
+                'defensive': '#27ae60',
+                'powerup': '#9b59b6'
+            };
+            
+            const stateColor = stateColors[aiState] || '#3498db';
+            ctx.fillStyle = stateColor;
+            ctx.fillText(`AI State: ${aiState.toUpperCase()}`, 16, 50);
+            
+            // AI Difficulty
+            const difficultyColor = aiDifficulty > 0.7 ? '#e74c3c' : aiDifficulty > 0.4 ? '#f39c12' : '#27ae60';
+            ctx.fillStyle = difficultyColor;
+            ctx.fillText(`AI Difficulty: ${Math.round(aiDifficulty * 100)}%`, 16, 70);
+        }
         
         // AI Health
         const healthPercent = Math.round((aiTank.health / aiTank.maxHealth) * 100);
