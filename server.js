@@ -92,5 +92,4 @@ server.headersTimeout = 0;
 
 server.listen(3000, () => {
     console.log('Tank game server running on http://localhost:3000');
-    console.log('Optimized for low latency (5ms target)');
 }); 

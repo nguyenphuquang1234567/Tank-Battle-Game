@@ -1728,6 +1728,27 @@ function update() {
     // Update bullets
     bullets = bullets.filter(bullet => bullet.update());
 
+    // Cancel bullets when they collide (đạn triệt tiêu lẫn nhau)
+    for (let i = 0; i < bullets.length; i++) {
+        for (let j = i + 1; j < bullets.length; j++) {
+            const b1 = bullets[i];
+            const b2 = bullets[j];
+            // Chỉ xét đạn khác màu
+            if (b1.color !== b2.color) {
+                const dx = b1.x - b2.x;
+                const dy = b1.y - b2.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist < b1.radius + b2.radius) {
+                    // Xóa cả hai viên đạn
+                    bullets.splice(j, 1);
+                    bullets.splice(i, 1);
+                    i--; // Lùi lại vì đã xóa phần tử i
+                    break; // Thoát vòng lặp j
+                }
+            }
+        }
+    }
+
     // Check bullet-tank collisions
     bullets.forEach((bullet, bulletIndex) => {
         tanks.forEach((tank, tankIndex) => {
